@@ -10,7 +10,7 @@ import { fetchBundle, sliceForModel, slicePagesForModel } from '@/lib/pdf/slice'
 import { isAuthoritative, planWindows } from '@/lib/ai/windows';
 import { loadProposal, saveRevision } from '@/lib/proposal/store';
 import { groupByCategory } from '@/lib/proposal/group';
-import { clusterPeople } from '@/lib/proposal/people';
+import { clusterPeople, UNIDENTIFIED } from '@/lib/proposal/people';
 import { summariseRuns } from '@/lib/proposal/validate';
 import type { PageSignals } from '@/lib/types';
 
@@ -397,16 +397,35 @@ async function runGrouping(
     client,
   );
 
-  const withPeople = clustered.docs.map((d) => ({
-    ...d,
-    // Whether this person is the client is now a property of the person, not a
-    // judgement made separately on each document.
-    relates: d.excluded
+  const clientNamed = !!(client.name ?? '').trim();
+
+  const withPeople = clustered.docs.map((d) => {
+    const group = clustered.people.find((p) => p.key === d.person_key);
+    const identified = !!group && group.key !== UNIDENTIFIED;
+
+    // Whether a document is the client's is a property of the PERSON, settled
+    // once across the whole bundle, not re-argued per document. Clustering sees
+    // every mention of a name together, so it has strictly more evidence than
+    // any single page did.
+    const relates = d.excluded
       ? ('n/a' as const)
-      : clustered.people.find((p) => p.key === d.person_key)?.isClient
-        ? ('yes' as const)
-        : d.relates,
-  }));
+      : !clientNamed || !identified
+        ? d.relates
+        : group.isClient
+          ? ('yes' as const)
+          : ('no' as const);
+
+    // Drop the per-document "identity uncertain" flag once identity has been
+    // settled. Leaving it on every row made the register look like fifteen
+    // problems when there was really one answered question — and buried the
+    // flags that do need a human.
+    const review =
+      relates === 'uncertain' || !identified
+        ? d.review
+        : d.review.filter((f) => f.code !== 'relates_uncertain');
+
+    return { ...d, relates, review };
+  });
 
   const { docs, merged } = groupByCategory(
     withPeople,

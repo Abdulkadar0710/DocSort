@@ -70,10 +70,14 @@ export function DocumentSidebar({ docs, people = [], activePage, onJump }: Props
             : undefined;
           const color = colorFor(colourIndex.get(d.doc_key) ?? i, d.excluded);
           const isActive = activePage !== null && d.pages.includes(activePage);
+          // Whose document this is belongs to the person header above, not to
+          // every row beneath it. A badge here says only what a reviewer must
+          // CHECK — and it says what the flag actually is, rather than
+          // restating the person. An earlier version chose the badge text from
+          // `relates`, so a document flagged "identity uncertain" displayed
+          // "another person" instead, hiding the thing it was raised for.
           const serious = d.review.filter((f) => SERIOUS_REVIEW_CODES.includes(f.code));
-          // With a person header above, repeating "another person" on every
-          // row underneath it is noise.
-          const needsReview = serious.length > 0 || (people.length <= 1 && d.relates === 'no');
+          const flag = serious[0];
 
           return (
             <li key={d.doc_key}>
@@ -132,18 +136,12 @@ export function DocumentSidebar({ docs, people = [], activePage, onJump }: Props
                     <span className="font-mono text-xs font-semibold text-slate-900 dark:text-slate-100">
                       {d.doc_key}
                     </span>
-                    {needsReview && (
+                    {flag && (
                       <span
-                        title={
-                          d.relates === 'no'
-                            ? (d.relates_reason ?? 'Appears to concern another person')
-                            : serious.map((f) => f.message).join(' · ')
-                        }
+                        title={serious.map((f) => f.message).join(' · ')}
                         className="rounded bg-amber-100 px-1 py-px text-[9px] font-medium text-amber-900 dark:bg-amber-950 dark:text-amber-300"
                       >
-                        {d.relates === 'no'
-                          ? 'another person'
-                          : REVIEW_LABELS[serious[0].code].toLowerCase()}
+                        {REVIEW_LABELS[flag.code].toLowerCase()}
                       </span>
                     )}
                   </span>

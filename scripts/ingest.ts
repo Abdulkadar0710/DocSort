@@ -20,6 +20,9 @@ interface Args {
   base: string;
   wait: boolean;
   device: string;
+  client: string;
+  dob: string;
+  ref: string;
 }
 
 function parseArgs(): Args {
@@ -29,13 +32,21 @@ function parseArgs(): Args {
     console.error('usage: tsx scripts/ingest.ts <bundle.pdf> [--base URL] [--no-wait]');
     process.exit(1);
   }
-  const baseIdx = argv.indexOf('--base');
-  const devIdx = argv.indexOf('--device');
+  const opt = (flag: string, fallback = '') => {
+    const i = argv.indexOf(flag);
+    return i >= 0 ? (argv[i + 1] ?? fallback) : fallback;
+  };
   return {
     file,
-    base: baseIdx >= 0 ? argv[baseIdx + 1] : 'http://localhost:3000',
+    base: opt('--base', 'http://localhost:3000'),
     wait: !argv.includes('--no-wait'),
-    device: devIdx >= 0 ? argv[devIdx + 1] : 'script-device',
+    device: opt('--device', 'script-device'),
+    // Without a client the pipeline has nothing to compare documents against,
+    // so every one comes back "uncertain" — which looks like a model failure
+    // and is really a missing input.
+    client: opt('--client'),
+    dob: opt('--dob'),
+    ref: opt('--ref'),
   };
 }
 
@@ -91,11 +102,17 @@ async function main() {
     body: JSON.stringify({
       device_id: args.device,
       name: basename(args.file).replace(/\.pdf$/i, ''),
+      client_name: args.client,
+      client_dob: args.dob,
+      client_ref: args.ref,
     }),
   });
   if (!createRes.ok) throw new Error(`create session: ${await createRes.text()}`);
   const { session, upload } = await createRes.json();
-  console.log(`Session ${session.id}`);
+  console.log(
+    `Session ${session.id}` +
+      (args.client ? `  ·  client: ${args.client}${args.dob ? ` (${args.dob})` : ''}` : '  ·  NO CLIENT NAMED (pass --client "Name" --dob DD/MM/YYYY)'),
+  );
 
   // 2. upload straight to Storage, bypassing the app server entirely
   const { createClient } = await import('@supabase/supabase-js');
