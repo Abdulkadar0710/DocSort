@@ -7,7 +7,7 @@ import {
   StyleSheet,
   renderToBuffer,
 } from '@react-pdf/renderer';
-import type { ProposalDoc } from '@/lib/types';
+import { REVIEW_LABELS, type Category, type ProposalDoc } from '@/lib/types';
 import { summariseRuns, type ValidationResult } from '@/lib/proposal/validate';
 
 /**
@@ -37,9 +37,9 @@ const styles = StyleSheet.create({
   th: { fontFamily: 'Helvetica-Bold', fontSize: 6.5 },
   td: { fontSize: 6.8, paddingRight: 3 },
 
-  cId: { width: 30 }, cPg: { width: 44 }, cTy: { width: 78 }, cDesc: { width: 150 },
-  cDt: { width: 46 }, cAu: { width: 78 }, cOrg: { width: 78 }, cCl: { width: 34 },
-  cDup: { width: 30 }, cFlag: { flex: 1 },
+  cId: { width: 28 }, cPg: { width: 42 }, cTy: { width: 76 }, cSub: { width: 54 },
+  cDesc: { width: 126 }, cDt: { width: 56 }, cAu: { width: 72 }, cOrg: { width: 70 },
+  cCl: { width: 32 }, cDup: { width: 28 }, cFlag: { flex: 1 },
 
   muted: { color: '#64748b' },
   warn: { color: '#b45309' },
@@ -59,6 +59,8 @@ export interface SummaryInput {
   ocrPageCount: number;
   /** Of those, how many got an invisible text layer from the browser OCR pass. */
   ocrTextLayerCount: number;
+  /** The category set derived for this bundle. */
+  categories: Category[];
 }
 
 const dash = (v: string | null | undefined) => (v && v !== 'unknown' ? v : '—');
@@ -88,7 +90,7 @@ function SummaryDoc(input: SummaryInput) {
   const dups = real.filter((d) => d.dup_of);
   const otherPerson = real.filter((d) => d.relates === 'no');
   const uncertain = real.filter((d) => d.relates === 'uncertain');
-  const flagged = real.filter((d) => d.review_flags.length > 0);
+  const flagged = real.filter((d) => d.review.length > 0);
   const nonContiguous = real.filter(
     (d) => d.pages.length > 1 && d.pages[d.pages.length - 1] - d.pages[0] + 1 !== d.pages.length,
   );
@@ -124,7 +126,8 @@ function SummaryDoc(input: SummaryInput) {
         <View style={styles.tHead}>
           <Text style={[styles.th, styles.cId]}>ID</Text>
           <Text style={[styles.th, styles.cPg]}>Bundle pages</Text>
-          <Text style={[styles.th, styles.cTy]}>Type</Text>
+          <Text style={[styles.th, styles.cTy]}>Category</Text>
+          <Text style={[styles.th, styles.cSub]}>Subtype</Text>
           <Text style={[styles.th, styles.cDesc]}>Description</Text>
           <Text style={[styles.th, styles.cDt]}>Date</Text>
           <Text style={[styles.th, styles.cAu]}>Author / discipline</Text>
@@ -139,6 +142,7 @@ function SummaryDoc(input: SummaryInput) {
             <Text style={[styles.td, styles.cId]}>{d.doc_key}</Text>
             <Text style={[styles.td, styles.cPg]}>{summariseRuns(d.pages)}</Text>
             <Text style={[styles.td, styles.cTy]}>{dash(d.doc_type)}</Text>
+            <Text style={[styles.td, styles.cSub]}>{dash(d.subcategory)}</Text>
             <Text style={[styles.td, styles.cDesc]}>
               {d.excluded ? 'Excluded — belongs to no document' : dash(d.title)}
             </Text>
@@ -159,11 +163,64 @@ function SummaryDoc(input: SummaryInput) {
             </Text>
             <Text style={[styles.td, styles.cDup]}>{dash(d.dup_of)}</Text>
             <Text style={[styles.td, styles.cFlag, styles.warn]}>
-              {d.review_flags.join('; ')}
+              {d.review.map((f) => `${REVIEW_LABELS[f.code]}: ${f.message}`).join('; ')}
               {d.relates_reason ? ` (${d.relates_reason})` : ''}
             </Text>
           </View>
         ))}
+
+        <Footer />
+      </Page>
+
+      {/* ------------------------------------------------------- the taxonomy */}
+      <Page size="A4" orientation="landscape" style={styles.page}>
+        <Text style={styles.h1}>How this bundle was categorised</Text>
+        <Text style={styles.body}>
+          These categories were not taken from a fixed list. They were derived
+          from this bundle — every document&apos;s description was read together
+          and a category set proposed to fit what is actually here, theneach
+          document was filed against it. A borrowed taxonomy tends not to fit
+          the matter at hand; letting each document invent its own produces
+          three names for the same thing by the end of a long bundle.
+        </Text>
+
+        <View style={styles.tHead}>
+          <Text style={[styles.th, { width: 150 }]}>Category</Text>
+          <Text style={[styles.th, { width: 44 }]}>Documents</Text>
+          <Text style={[styles.th, { width: 56 }]}>Origin</Text>
+          <Text style={[styles.th, { flex: 1 }]}>What belongs in it</Text>
+        </View>
+
+        {input.categories.map((c) => {
+          const count = docs.filter((d) => d.doc_type === c.name).length;
+          return (
+            <View key={c.id} style={styles.tRow} wrap={false}>
+              <Text style={[styles.td, { width: 150 }]}>{c.name}</Text>
+              <Text style={[styles.td, { width: 44 }]}>{count || '—'}</Text>
+              <Text style={[styles.td, { width: 56 }, styles.muted]}>{c.origin}</Text>
+              <Text style={[styles.td, { flex: 1 }]}>{c.description}</Text>
+            </View>
+          );
+        })}
+
+        {docs.some((d) => d.proposed_category) && (
+          <>
+            <Text style={styles.h2}>Categories proposed while filing</Text>
+            <Text style={styles.body}>
+              Raised because a document fitted nothing in the set above. Each has
+              been added so later documents could use it; they are worth a look
+              before the taxonomy is reused on another matter.
+            </Text>
+            {docs
+              .filter((d) => d.proposed_category)
+              .map((d) => (
+                <Text key={d.doc_key} style={styles.body}>
+                  {d.doc_key}: &quot;{d.proposed_category}&quot; —{' '}
+                  {d.proposed_category_reason ?? 'no reason given'}
+                </Text>
+              ))}
+          </>
+        )}
 
         <Footer />
       </Page>
@@ -184,7 +241,7 @@ function SummaryDoc(input: SummaryInput) {
           excluded.map((d) => (
             <Text key={d.doc_key} style={styles.body}>
               {d.doc_key} — page {summariseRuns(d.pages)}:{' '}
-              {d.review_flags.join('; ') || 'blank page'}
+              {d.review.map((f) => f.message).join('; ') || 'blank page'}
             </Text>
           ))
         )}
@@ -233,7 +290,8 @@ function SummaryDoc(input: SummaryInput) {
             .filter((d) => !d.dup_of && d.relates === 'yes')
             .map((d) => (
               <Text key={d.doc_key} style={styles.body}>
-                {d.doc_key} (pages {summariseRuns(d.pages)}): {d.review_flags.join('; ')}
+                {d.doc_key} (pages {summariseRuns(d.pages)}):{' '}
+                {d.review.map((f) => `${REVIEW_LABELS[f.code]} — ${f.message}`).join('; ')}
               </Text>
             ))
         )}

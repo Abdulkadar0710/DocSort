@@ -32,7 +32,10 @@ interface PredDoc {
   org: string | null;
   relates: string;
   dup_of: string | null;
-  review_flags: string[];
+  review: { code: string; message: string }[];
+  subcategory: string | null;
+  overview: string | null;
+  proposed_category: string | null;
   excluded: boolean;
   title: string | null;
 }
@@ -160,7 +163,6 @@ async function main() {
   // --------------------------------------------------------- 2. the fields
   console.log('\n── Identified details (on best-overlap pairs) ──────────');
   for (const [label, get] of [
-    ['Type  ', (x: { g: GoldDoc; p: PredDoc }) => [x.p.doc_type, x.g.type]],
     ['Date  ', (x: { g: GoldDoc; p: PredDoc }) => [x.p.doc_date, x.g.date]],
     ['Author', (x: { g: GoldDoc; p: PredDoc }) => [x.p.author, x.g.author]],
     ['Org   ', (x: { g: GoldDoc; p: PredDoc }) => [x.p.org, x.g.org]],
@@ -198,7 +200,7 @@ async function main() {
 
   const goldReview = gold.filter((g) => g.review);
   const predFlagPages = new Set(
-    pred.filter((p) => p.review_flags.length).flatMap((p) => p.pages),
+    pred.filter((p) => p.review.length).flatMap((p) => p.pages),
   );
   const reviewHit = goldReview.filter((g) =>
     g.pages.some((p) => predFlagPages.has(p)),
@@ -239,6 +241,28 @@ async function main() {
       [p.doc_type, p.doc_date, p.author, p.org].filter((f) => !f || f === 'unknown').length,
     0,
   );
+  // Categories are derived from this bundle rather than taken from the answer
+  // key's own 16 names, so a string comparison would measure vocabulary, not
+  // correctness. Report the shape of the taxonomy instead and let a human judge
+  // whether it organises the bundle well.
+  const cats = new Map<string, number>();
+  for (const p of pred) {
+    const c = p.doc_type ?? '(unfiled)';
+    cats.set(c, (cats.get(c) ?? 0) + 1);
+  }
+  console.log('\n── Derived taxonomy ────────────────────────────────────');
+  console.log(`  ${cats.size} categories in use, against ${new Set(gold.map((g) => g.type)).size} in the answer key`);
+  for (const [name, n] of [...cats.entries()].sort((a, b) => b[1] - a[1])) {
+    console.log(`    ${String(n).padStart(3)}  ${name}`);
+  }
+  const proposed = pred.filter((p) => p.proposed_category);
+  if (proposed.length) {
+    console.log(`  proposed while filing: ${proposed.map((p) => p.proposed_category).join(', ')}`);
+  }
+  const withSub = pred.filter((p) => p.subcategory).length;
+  const withOverview = pred.filter((p) => p.overview).length;
+  console.log(`  subtype given: ${withSub}/${pred.length}   overview given: ${withOverview}/${pred.length}`);
+
   console.log('\n── Honesty ─────────────────────────────────────────────');
   console.log(
     `  Fields left unknown : ${unknownFields} of ${pred.length * 4}  ` +

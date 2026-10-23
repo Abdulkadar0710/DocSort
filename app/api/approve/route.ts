@@ -6,6 +6,7 @@ import { validateProposal } from '@/lib/proposal/validate';
 import { fetchBundle } from '@/lib/pdf/slice';
 import { buildChildPdfs } from '@/lib/pdf/export';
 import { renderSummaryPdf } from '@/lib/pdf/summary';
+import { loadCategories } from '@/lib/ai/taxonomy';
 import type { OcrWord } from '@/lib/types';
 
 /**
@@ -111,6 +112,7 @@ export async function POST(req: Request) {
       approvedAt,
       ocrPageCount,
       ocrTextLayerCount,
+      categories: await loadCategories(sb, { activeOnly: false }),
     });
 
     const safeName = session.name.replace(/[^\p{L}\p{N}-]+/gu, '-').slice(0, 40);

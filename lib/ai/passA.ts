@@ -1,21 +1,22 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { claude, MODEL_BULK, readUsage, toolResult, type Usage } from './claude';
 import { PASS_A_SYSTEM } from './prompts';
-import { DOC_TYPES, type PageSignals } from '@/lib/types';
+import { cleanReview, orNull, type PageSignals } from '@/lib/types';
 
 /**
- * Pass A — describe every page, without yet deciding where documents begin.
+ * Pass A — where do documents begin and end?
  *
- * Separating "what is on this page" from "which pages form a document" is the
- * core of how the work is divided. Page description is local, parallelisable
- * and cheap; grouping is global and needs the whole picture. Mixing them would
- * force the expensive judgement to be made a window at a time, and a window
- * edge would silently become a document boundary.
+ * Separating "where are the seams" from "what is this document" is the core of
+ * how the work is divided. Seam-finding is local, parallelisable and cheap, and
+ * needs only the pages either side of a boundary. Identifying a document is
+ * global to that document and needs all of its pages at once — so it happens
+ * later, in Pass C, rather than being guessed from whichever page a window
+ * happened to start on.
  */
 
 const REPORT_TOOL: Anthropic.Tool = {
   name: 'report_pages',
-  description: 'Report your description of every page you were shown, in order.',
+  description: 'Report boundary evidence for every page you were shown, in order.',
   input_schema: {
     type: 'object',
     required: ['pages'],
@@ -27,7 +28,7 @@ const REPORT_TOOL: Anthropic.Tool = {
           required: [
             'page_number',
             'is_blank',
-            'relates',
+            'has_letterhead',
             'continues_previous',
             'continues_confidence',
             'confidence',
@@ -35,34 +36,39 @@ const REPORT_TOOL: Anthropic.Tool = {
           properties: {
             page_number: {
               type: 'integer',
-              description: 'The bundle page number printed in the label above the page.',
+              description: 'The bundle page number given in the instruction.',
             },
             is_blank: { type: 'boolean' },
-            title: { type: ['string', 'null'] },
-            doc_type: { type: ['string', 'null'], enum: [...DOC_TYPES, 'unknown', null] },
-            doc_date: {
-              type: ['string', 'null'],
-              description: 'As printed, DD/MM/YYYY where possible, or "unknown".',
-            },
-            author: { type: ['string', 'null'] },
-            discipline: { type: ['string', 'null'] },
-            org: { type: ['string', 'null'] },
+            gist: { type: 'string', description: 'One short line, under 15 words.' },
+            org: { type: 'string' },
+            doc_date: { type: 'string', description: 'DD/MM/YYYY as printed.' },
             patient_name_seen: {
-              type: ['string', 'null'],
+              type: 'string',
               description: 'Any person name printed on the page, verbatim.',
             },
             page_marker: {
-              type: ['object', 'null'],
+              type: 'object',
               properties: { n: { type: 'integer' }, of: { type: 'integer' } },
               required: ['n', 'of'],
             },
             has_letterhead: { type: 'boolean' },
             continues_previous: { type: 'boolean' },
             continues_confidence: { type: 'number', minimum: 0, maximum: 1 },
-            relates: { type: 'string', enum: ['yes', 'no', 'uncertain', 'n/a'] },
-            relates_reason: { type: ['string', 'null'] },
-            review_flags: { type: 'array', items: { type: 'string' } },
-            extracted_text: { type: ['string', 'null'], maxLength: 1500 },
+            review: {
+              type: 'array',
+              items: {
+                type: 'object',
+                required: ['code', 'message'],
+                properties: {
+                  code: {
+                    type: 'string',
+                    enum: ['illegible', 'rotated', 'multiple_patients', 'low_confidence'],
+                  },
+                  message: { type: 'string' },
+                },
+              },
+            },
+            extracted_text: { type: 'string' },
             confidence: { type: 'number', minimum: 0, maximum: 1 },
           },
         },
@@ -77,46 +83,33 @@ export interface PassAResult {
   rotationsCleared: number[];
 }
 
-function coerce(raw: Partial<PageSignals>, fallbackPage: number): PageSignals {
-  const unknownish = (v: unknown): string | null => {
-    if (typeof v !== 'string') return null;
-    const t = v.trim();
-    if (!t || /^(unknown|n\/?a|none|null)$/i.test(t)) return null;
-    return t;
-  };
+const clamp = (n: unknown) => Math.max(0, Math.min(1, Number(n) || 0));
 
+function coerce(raw: Partial<PageSignals>, fallbackPage: number): PageSignals {
   return {
     page_number: raw.page_number ?? fallbackPage,
     is_blank: raw.is_blank ?? false,
-    title: unknownish(raw.title),
-    doc_type: unknownish(raw.doc_type),
-    doc_date: unknownish(raw.doc_date),
-    author: unknownish(raw.author),
-    discipline: unknownish(raw.discipline),
-    org: unknownish(raw.org),
-    patient_name_seen: unknownish(raw.patient_name_seen),
+    gist: orNull(raw.gist),
+    org: orNull(raw.org),
+    doc_date: orNull(raw.doc_date),
+    patient_name_seen: orNull(raw.patient_name_seen),
     page_marker:
       raw.page_marker && raw.page_marker.of > 0 ? raw.page_marker : null,
     has_letterhead: raw.has_letterhead ?? false,
     continues_previous: raw.continues_previous ?? false,
-    continues_confidence: clamp(raw.continues_confidence ?? 0),
-    relates: raw.relates ?? 'uncertain',
-    relates_reason: unknownish(raw.relates_reason),
-    review_flags: Array.isArray(raw.review_flags) ? raw.review_flags : [],
+    continues_confidence: clamp(raw.continues_confidence),
+    review: cleanReview(raw.review),
     extracted_text: raw.extracted_text?.slice(0, 1500) ?? null,
     confidence: clamp(raw.confidence ?? 0.5),
   };
 }
 
-const clamp = (n: number) => Math.max(0, Math.min(1, Number(n) || 0));
-
 export async function classifyWindow(opts: {
   pdfBase64: string;
   pageNumbers: number[];
   rotationsCleared: number[];
-  /** Embedded text layer per page, where the original had one. Given to the
-   *  model alongside the pages so it need not OCR what is already machine
-   *  readable — cheaper and more accurate than reading pixels. */
+  /** Embedded text layer per page, where the original had one. Given alongside
+   *  the pages so the model need not re-read what is already machine readable. */
   textByPage: Map<number, string>;
 }): Promise<PassAResult> {
   const { pdfBase64, pageNumbers, rotationsCleared, textByPage } = opts;
@@ -133,14 +126,14 @@ export async function classifyWindow(opts: {
   const rotationNote = rotationsCleared.length
     ? `\n\nNote: bundle page(s) ${rotationsCleared.join(', ')} declare a rotation ` +
       `in the original that displays them sideways or upside down. They have ` +
-      `been straightened for you here, but that defect is real — flag each for ` +
-      `human review.`
+      `been straightened for you here, but the defect is real — flag each with ` +
+      `code "rotated".`
     : '';
 
   const instruction =
     `This window covers bundle pages ${pageNumbers[0]} to ` +
     `${pageNumbers[pageNumbers.length - 1]}. The attached PDF contains exactly ` +
-    `those pages in order, so the first page of the PDF is bundle page ` +
+    `those pages in order, so the first page of the attachment is bundle page ` +
     `${pageNumbers[0]}.\n\n` +
     `Report on every one of these ${pageNumbers.length} pages, using the bundle ` +
     `page numbers above — not the position within the attachment.` +
@@ -154,9 +147,9 @@ export async function classifyWindow(opts: {
       {
         type: 'text',
         text: PASS_A_SYSTEM,
-        // The brief and taxonomy are identical for every window in every
-        // bundle, so they are written to the cache once and read back ~24 times
-        // on a 192-page bundle instead of being re-billed each call.
+        // Identical for every window of every bundle, so it is written to the
+        // cache once and read back on each of the ~24 calls rather than
+        // re-billed in full.
         cache_control: { type: 'ephemeral' },
       },
     ],
@@ -168,11 +161,7 @@ export async function classifyWindow(opts: {
         content: [
           {
             type: 'document',
-            source: {
-              type: 'base64',
-              media_type: 'application/pdf',
-              data: pdfBase64,
-            },
+            source: { type: 'base64', media_type: 'application/pdf', data: pdfBase64 },
           },
           { type: 'text', text: instruction },
         ],
@@ -186,8 +175,8 @@ export async function classifyWindow(opts: {
   );
 
   // Trust the window's page range over the model's arithmetic: keep only pages
-  // we actually sent, and fill in any the model skipped so a dropped page can
-  // never silently vanish from the split.
+  // we actually sent, and fill in any it skipped, so a dropped page can never
+  // silently vanish from the split.
   const byNumber = new Map<number, PageSignals>();
   (pages ?? []).forEach((raw, i) => {
     const s = coerce(raw, pageNumbers[i] ?? pageNumbers[0]);
@@ -198,17 +187,23 @@ export async function classifyWindow(opts: {
     (p) =>
       byNumber.get(p) ?? {
         ...coerce({}, p),
-        review_flags: ['Automatic description failed for this page'],
+        review: [
+          {
+            code: 'low_confidence' as const,
+            message: 'Automatic reading failed for this page',
+          },
+        ],
         confidence: 0,
       },
   );
 
   for (const p of rotationsCleared) {
     const s = byNumber.get(p);
-    const flag =
-      'Page declares a rotation in the original and displays sideways or upside down';
-    if (s && !s.review_flags.some((f) => /rotat/i.test(f))) {
-      s.review_flags.push(flag);
+    if (s && !s.review.some((f) => f.code === 'rotated')) {
+      s.review.push({
+        code: 'rotated',
+        message: 'Page displays sideways or upside down in the original',
+      });
     }
   }
 

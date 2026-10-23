@@ -35,20 +35,24 @@ export async function fetchBundle(
  * untouched, because the brief requires split pages to look exactly as they do
  * in the original — including when the original is wrong.
  */
-export async function sliceForModel(
+/**
+ * Cut an arbitrary LIST of pages, in the order given.
+ *
+ * A list rather than a range because a document is a set of pages, not a span:
+ * the DEV bundle's physiotherapy report is pages 88 and 90, with someone else's
+ * pathology results at 89. Handing the model that document means handing it
+ * exactly those two pages, with the intruder left out.
+ */
+export async function slicePagesForModel(
   bundleBytes: Uint8Array,
-  start: number,
-  end: number,
+  pages: number[],
 ): Promise<{ base64: string; pageNumbers: number[]; rotationsCleared: number[] }> {
   const src = await PDFDocument.load(bundleBytes, { ignoreEncryption: true });
   const out = await PDFDocument.create();
+  const total = src.getPageCount();
 
-  const indices: number[] = [];
-  const pageNumbers: number[] = [];
-  for (let p = start; p <= Math.min(end, src.getPageCount()); p++) {
-    indices.push(p - 1);
-    pageNumbers.push(p);
-  }
+  const pageNumbers = pages.filter((p) => p >= 1 && p <= total);
+  const indices = pageNumbers.map((p) => p - 1);
 
   const copied = await out.copyPages(src, indices);
   const rotationsCleared: number[] = [];
@@ -67,4 +71,15 @@ export async function sliceForModel(
     pageNumbers,
     rotationsCleared,
   };
+}
+
+/** Convenience wrapper for the contiguous windows Pass A walks. */
+export async function sliceForModel(
+  bundleBytes: Uint8Array,
+  start: number,
+  end: number,
+) {
+  const pages: number[] = [];
+  for (let p = start; p <= end; p++) pages.push(p);
+  return slicePagesForModel(bundleBytes, pages);
 }

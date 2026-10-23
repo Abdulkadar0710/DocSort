@@ -1,27 +1,46 @@
 import { NextResponse } from 'next/server';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { serverClient } from '@/lib/supabase';
 import { hasApiKey } from '@/lib/ai/claude';
 import { classifyWindow } from '@/lib/ai/passA';
 import { stitch } from '@/lib/ai/passB';
-import { fetchBundle, sliceForModel } from '@/lib/pdf/slice';
+import { categoriseDocument } from '@/lib/ai/categorise';
+import { deriveAndStoreTaxonomy, ensureCategory, loadCategories } from '@/lib/ai/taxonomy';
+import { fetchBundle, sliceForModel, slicePagesForModel } from '@/lib/pdf/slice';
 import { isAuthoritative, planWindows } from '@/lib/ai/windows';
-import { saveRevision } from '@/lib/proposal/store';
+import { loadProposal, saveRevision } from '@/lib/proposal/store';
 import { summariseRuns } from '@/lib/proposal/validate';
 import type { PageSignals } from '@/lib/types';
 
 /**
  * POST /api/jobs/tick  { session_id }
  *
- * Processes exactly ONE page window per call. This is the whole answer to
+ * Processes exactly ONE unit of work per call. This is the whole answer to
  * Vercel's function duration limit: a bundle of any size is just more ticks,
  * and no single invocation ever approaches its cap. The browser drives the loop
  * and so sees real progress rather than one long opaque wait.
  *
- * When the last classify window lands, this also runs the stitch pass and saves
- * the first real proposal.
+ * Three kinds of work, in order:
+ *   classify   — one page window, finding where documents begin and end
+ *   taxonomy   — once, deriving the category set from the whole assembled set
+ *   categorise — one document, with all of its pages in view
  */
 
 export const maxDuration = 120;
+
+type Kind = 'classify' | 'taxonomy' | 'categorise';
+
+/** Earlier kinds must finish before later ones can start. */
+const ORDER: Kind[] = ['classify', 'taxonomy', 'categorise'];
+
+interface ClaimedJob {
+  id: string;
+  kind: Kind;
+  window_start: number | null;
+  window_end: number | null;
+  proposal_id: string | null;
+  doc_key: string | null;
+}
 
 export async function POST(req: Request) {
   let body: { session_id?: string };
@@ -38,9 +57,10 @@ export async function POST(req: Request) {
   if (!hasApiKey()) {
     return NextResponse.json({
       idle: true,
-      blocked: 'ANTHROPIC_API_KEY is not set, so documents cannot be identified yet. '
-        + 'The bundle is uploaded and every page is listed as its own document; '
-        + 'add the key and reload to run identification.',
+      blocked:
+        'ANTHROPIC_API_KEY is not set, so documents cannot be identified yet. ' +
+        'The bundle is uploaded and every page is listed as its own document; ' +
+        'add the key and reload to run identification.',
     });
   }
 
@@ -55,101 +75,96 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'session is not ready' }, { status: 409 });
   }
 
-  // ---------------------------------------------------------- claim a job
-  const { data: candidates } = await sb
-    .from('jobs')
-    .select('id, window_start, window_end, attempts')
-    .eq('session_id', sessionId)
-    .eq('kind', 'classify')
-    .eq('status', 'pending')
-    .order('window_start')
-    .limit(4);
+  // --------------------------------------------------------- claim a job
+  // Strictly in phase order: a categorise job must not run before the taxonomy
+  // it files against exists.
+  let claimed: ClaimedJob | null = null;
 
-  let claimed: { id: string; window_start: number; window_end: number } | null = null;
-  for (const c of candidates ?? []) {
-    // Guarding the update on status='pending' makes the claim atomic: a racing
-    // tick updates zero rows and moves on to the next candidate.
-    const { data: got } = await sb
+  for (const kind of ORDER) {
+    const { data: outstanding } = await sb
       .from('jobs')
-      .update({ status: 'running', attempts: c.attempts + 1 })
-      .eq('id', c.id)
+      .select('id', { count: 'exact', head: false })
+      .eq('session_id', sessionId)
+      .eq('kind', kind)
+      .in('status', ['pending', 'running'])
+      .limit(1);
+    if (!outstanding?.length) continue;
+
+    const { data: candidates } = await sb
+      .from('jobs')
+      .select('id, kind, window_start, window_end, proposal_id, doc_key, attempts')
+      .eq('session_id', sessionId)
+      .eq('kind', kind)
       .eq('status', 'pending')
-      .select('id, window_start, window_end');
-    if (got?.length) {
-      claimed = got[0];
-      break;
+      .order('window_start', { nullsFirst: true })
+      .limit(4);
+
+    for (const c of candidates ?? []) {
+      // Guarding the update on status='pending' makes the claim atomic: a
+      // racing tick updates zero rows and moves on to the next candidate.
+      const { data: got } = await sb
+        .from('jobs')
+        .update({ status: 'running', attempts: c.attempts + 1 })
+        .eq('id', c.id)
+        .eq('status', 'pending')
+        .select('id, kind, window_start, window_end, proposal_id, doc_key');
+      if (got?.length) {
+        claimed = got[0] as ClaimedJob;
+        break;
+      }
     }
+
+    // This phase still has work, even if we could not claim any of it; do not
+    // fall through to a later phase.
+    break;
   }
 
   if (claimed) {
     try {
-      const bundle = await fetchBundle(sb, session.bundle_path);
-      const { base64, pageNumbers, rotationsCleared } = await sliceForModel(
-        bundle,
-        claimed.window_start,
-        claimed.window_end,
-      );
-
-      const { data: pageRows } = await sb
-        .from('pages')
-        .select('page_number, text, has_text_layer')
-        .eq('session_id', sessionId)
-        .gte('page_number', claimed.window_start)
-        .lte('page_number', claimed.window_end);
-
-      const textByPage = new Map<number, string>();
-      for (const r of pageRows ?? []) {
-        if (r.has_text_layer && r.text) textByPage.set(r.page_number, r.text);
+      if (claimed.kind === 'classify') {
+        await runClassify(sb, sessionId, session.bundle_path, claimed);
+      } else if (claimed.kind === 'taxonomy') {
+        await runTaxonomy(sb, sessionId, claimed.id);
+      } else {
+        await runCategorise(sb, sessionId, session.bundle_path, claimed);
       }
-
-      const { signals, usage } = await classifyWindow({
-        pdfBase64: base64,
-        pageNumbers,
-        rotationsCleared,
-        textByPage,
-      });
-
-      await sb
-        .from('jobs')
-        .update({ status: 'done', result: { signals, usage } })
-        .eq('id', claimed.id);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      // Two shots at a window, then leave it failed. The merge pass below
-      // treats an unprocessed page as its own single-page document and flags
-      // it, so a failed window degrades the split rather than breaking it.
       const { data: j } = await sb
         .from('jobs')
         .select('attempts')
         .eq('id', claimed.id)
         .single();
+      // Two shots, then leave it failed. A failed window degrades the split
+      // rather than breaking it; a failed categorise leaves one document
+      // unidentified and flagged.
       await sb
         .from('jobs')
-        .update({
-          status: (j?.attempts ?? 1) >= 2 ? 'failed' : 'pending',
-          error: msg,
-        })
+        .update({ status: (j?.attempts ?? 1) >= 2 ? 'failed' : 'pending', error: msg })
         .eq('id', claimed.id);
-
       return NextResponse.json({ ok: false, error: msg }, { status: 200 });
     }
   }
 
-  // ------------------------------------------------- merge when all are in
+  // --------------------------------------------- advance between phases
   const { data: all } = await sb
     .from('jobs')
-    .select('status, window_start, window_end, result')
-    .eq('session_id', sessionId)
-    .eq('kind', 'classify');
+    .select('kind, status, window_start, window_end, result')
+    .eq('session_id', sessionId);
 
-  const remaining = (all ?? []).filter(
-    (j) => j.status === 'pending' || j.status === 'running',
-  ).length;
-  const done = (all ?? []).filter((j) => j.status === 'done').length;
+  const jobs = all ?? [];
+  const outstanding = (kind: Kind) =>
+    jobs.filter((j) => j.kind === kind && (j.status === 'pending' || j.status === 'running'))
+      .length;
 
-  if (remaining === 0 && session.status === 'processing') {
+  // Classification finished and nothing downstream queued yet -> assemble.
+  if (
+    outstanding('classify') === 0 &&
+    jobs.some((j) => j.kind === 'classify') &&
+    !jobs.some((j) => j.kind === 'taxonomy')
+  ) {
     try {
-      await runStitch(sb, sessionId, session.page_count, all ?? []);
+      await runStitch(sb, sessionId, session.page_count, jobs);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       await sb.from('sessions').update({ status: 'failed', error: msg }).eq('id', sessionId);
@@ -157,16 +172,185 @@ export async function POST(req: Request) {
     }
   }
 
+  const remaining =
+    outstanding('classify') + outstanding('taxonomy') + outstanding('categorise');
+
+  if (remaining === 0 && session.status === 'processing') {
+    await sb.from('sessions').update({ status: 'proposed' }).eq('id', sessionId);
+  }
+
   return NextResponse.json({
     ok: true,
     idle: !claimed && remaining === 0,
-    done,
+    done: jobs.filter((j) => j.status === 'done').length,
     remaining,
-    total: (all ?? []).length,
+    total: jobs.length,
   });
 }
 
+/* ------------------------------------------------------------------ work */
+
+async function runClassify(
+  sb: SupabaseClient,
+  sessionId: string,
+  bundlePath: string,
+  job: { id: string; window_start: number | null; window_end: number | null },
+) {
+  const bundle = await fetchBundle(sb, bundlePath);
+  const { base64, pageNumbers, rotationsCleared } = await sliceForModel(
+    bundle,
+    job.window_start!,
+    job.window_end!,
+  );
+
+  const { data: pageRows } = await sb
+    .from('pages')
+    .select('page_number, text, has_text_layer')
+    .eq('session_id', sessionId)
+    .gte('page_number', job.window_start!)
+    .lte('page_number', job.window_end!);
+
+  const textByPage = new Map<number, string>();
+  for (const r of pageRows ?? []) {
+    if (r.has_text_layer && r.text) textByPage.set(r.page_number, r.text);
+  }
+
+  const { signals, usage } = await classifyWindow({
+    pdfBase64: base64,
+    pageNumbers,
+    rotationsCleared,
+    textByPage,
+  });
+
+  await sb
+    .from('jobs')
+    .update({ status: 'done', result: { signals, usage } })
+    .eq('id', job.id);
+}
+
+async function runTaxonomy(sb: SupabaseClient, sessionId: string, jobId: string) {
+  const proposal = await loadProposal(sb, sessionId);
+  if (!proposal) throw new Error('no proposal to derive a taxonomy from');
+
+  const { categories, usage } = await deriveAndStoreTaxonomy(
+    sb,
+    sessionId,
+    proposal.docs,
+  );
+
+  // Now that a taxonomy exists, queue one categorise job per real document.
+  // Excluded pages need no categorising: they are already accounted for.
+  const targets = proposal.docs.filter((d) => !d.excluded);
+  if (targets.length) {
+    await sb.from('jobs').insert(
+      targets.map((d) => ({
+        session_id: sessionId,
+        kind: 'categorise' as const,
+        proposal_id: proposal.id,
+        doc_key: d.doc_key,
+        window_start: d.pages[0],
+        window_end: d.pages[d.pages.length - 1],
+      })),
+    );
+  }
+
+  await sb
+    .from('jobs')
+    .update({
+      status: 'done',
+      result: { categories: categories.map((c) => c.name), usage },
+    })
+    .eq('id', jobId);
+}
+
+async function runCategorise(
+  sb: SupabaseClient,
+  sessionId: string,
+  bundlePath: string,
+  job: { id: string; proposal_id: string | null; doc_key: string | null },
+) {
+  if (!job.proposal_id || !job.doc_key) throw new Error('categorise job is missing its target');
+
+  const { data: doc } = await sb
+    .from('documents')
+    .select('id, doc_key, document_pages(page_number, position)')
+    .eq('proposal_id', job.proposal_id)
+    .eq('doc_key', job.doc_key)
+    .single();
+  if (!doc) throw new Error(`document ${job.doc_key} no longer exists`);
+
+  const pages = (doc.document_pages as { page_number: number; position: number }[])
+    .sort((a, b) => a.position - b.position)
+    .map((p) => p.page_number);
+  if (!pages.length) throw new Error(`document ${job.doc_key} has no pages`);
+
+  const bundle = await fetchBundle(sb, bundlePath);
+  // A page LIST, not a range: a non-contiguous document is sent as exactly its
+  // own pages, with any intruding page left out.
+  const { base64, pageNumbers, rotationsCleared } = await slicePagesForModel(bundle, pages);
+
+  const { data: pageRows } = await sb
+    .from('pages')
+    .select('page_number, text, has_text_layer')
+    .eq('session_id', sessionId)
+    .in('page_number', pages);
+
+  const textByPage = new Map<number, string>();
+  for (const r of pageRows ?? []) {
+    if (r.has_text_layer && r.text) textByPage.set(r.page_number, r.text);
+  }
+
+  const categories = await loadCategories(sb);
+  const { meta, usage } = await categoriseDocument({
+    pdfBase64: base64,
+    pageNumbers,
+    rotationsCleared,
+    categories,
+    textByPage,
+    docKey: job.doc_key,
+  });
+
+  // A genuinely new category joins the taxonomy so later documents can use it
+  // too, rather than every one of them proposing the same thing separately.
+  if (meta.proposed_category && meta.proposed_category_reason) {
+    await ensureCategory(sb, {
+      name: meta.proposed_category,
+      description: meta.proposed_category_reason,
+      origin: 'proposed',
+      reason: meta.proposed_category_reason,
+      sessionId,
+      sortOrder: 500,
+    });
+  }
+
+  // Metadata fills into the existing revision rather than creating a new one.
+  // The grouping has not changed — only what we know about each document — and
+  // a revision per document would make the history unreadable.
+  await sb
+    .from('documents')
+    .update({
+      overview: meta.overview,
+      title: meta.title,
+      doc_type: meta.doc_type,
+      subcategory: meta.subcategory,
+      proposed_category: meta.proposed_category,
+      proposed_category_reason: meta.proposed_category_reason,
+      doc_date: meta.doc_date,
+      author: meta.author,
+      discipline: meta.discipline,
+      org: meta.org,
+      relates: meta.relates,
+      relates_reason: meta.relates_reason,
+      review: meta.review,
+      confidence: meta.confidence,
+    })
+    .eq('id', doc.id);
+
+  await sb.from('jobs').update({ status: 'done', result: { usage } }).eq('id', job.id);
+}
+
 type JobRow = {
+  kind: string;
   status: string;
   window_start: number | null;
   window_end: number | null;
@@ -174,7 +358,7 @@ type JobRow = {
 };
 
 async function runStitch(
-  sb: ReturnType<typeof serverClient>,
+  sb: SupabaseClient,
   sessionId: string,
   pageCount: number,
   jobs: JobRow[],
@@ -186,7 +370,7 @@ async function runStitch(
   // "does this continue the previous page?" judgement was never made blind.
   const chosen = new Map<number, PageSignals>();
   for (const job of jobs) {
-    if (job.status !== 'done' || !job.result) continue;
+    if (job.kind !== 'classify' || job.status !== 'done' || !job.result) continue;
     const { signals } = job.result as { signals: PageSignals[] };
     const w = { start: job.window_start!, end: job.window_end! };
     for (const s of signals ?? []) {
@@ -194,8 +378,8 @@ async function runStitch(
     }
   }
 
-  // Any page no window successfully described still gets a place in the split,
-  // flagged, rather than disappearing. Ground rule #1 holds even on failure.
+  // Any page no window described still gets a place in the split, flagged,
+  // rather than disappearing. Ground rule #1 holds even on failure.
   const missing: number[] = [];
   for (let p = 1; p <= pageCount; p++) {
     if (chosen.has(p)) continue;
@@ -203,20 +387,17 @@ async function runStitch(
     chosen.set(p, {
       page_number: p,
       is_blank: false,
-      title: null,
-      doc_type: null,
-      doc_date: null,
-      author: null,
-      discipline: null,
+      gist: null,
       org: null,
+      doc_date: null,
       patient_name_seen: null,
       page_marker: null,
       has_letterhead: false,
       continues_previous: false,
       continues_confidence: 0,
-      relates: 'uncertain',
-      relates_reason: null,
-      review_flags: ['Automatic description did not complete for this page'],
+      review: [
+        { code: 'low_confidence', message: 'Automatic reading did not complete for this page' },
+      ],
       extracted_text: null,
       confidence: 0,
     });
@@ -226,42 +407,43 @@ async function runStitch(
   const { docs, decisions } = stitch(signals);
 
   const nonContiguous = decisions.filter((d) => !d.contiguous);
-  const summaryParts = [
-    `Identified ${docs.filter((d) => !d.excluded).length} documents across ${pageCount} pages`,
+  const parts = [
+    `Found ${docs.filter((d) => !d.excluded).length} documents across ${pageCount} pages`,
     `${docs.filter((d) => d.excluded).length} page(s) excluded as blank`,
     `${decisions.length} page(s) merged into a preceding document`,
   ];
   if (nonContiguous.length) {
-    summaryParts.push(
-      `${nonContiguous.length} page(s) rejoined a document across unrelated pages`,
-    );
+    parts.push(`${nonContiguous.length} page(s) rejoined a document across unrelated pages`);
   }
   if (missing.length) {
-    summaryParts.push(`pages ${summariseRuns(missing)} could not be read automatically`);
+    parts.push(`pages ${summariseRuns(missing)} could not be read automatically`);
   }
 
-  await saveRevision(sb, sessionId, docs, {
+  const saved = await saveRevision(sb, sessionId, docs, {
     origin: 'ai',
-    summary: summaryParts.join('; ') + '.',
+    summary: parts.join('; ') + '.',
     pageCount,
   });
 
-  await sb
-    .from('messages')
-    .insert({
-      session_id: sessionId,
-      role: 'ai',
-      content:
-        `I went through all ${pageCount} pages and found ` +
-        `${docs.filter((d) => !d.excluded).length} documents. ` +
-        (nonContiguous.length
-          ? `${nonContiguous.length} page(s) belong to a document they are not next to, ` +
-            `which I have joined up. `
-          : '') +
-        `Documents I was unsure about are flagged in the list. ` +
-        `Scroll the preview to check the split, and tell me anything that needs changing.`,
-      proposal_revision: null,
-    });
+  // One taxonomy job, which will in turn queue the per-document work.
+  await sb.from('jobs').insert({
+    session_id: sessionId,
+    kind: 'taxonomy',
+    proposal_id: saved.id,
+  });
 
-  await sb.from('sessions').update({ status: 'proposed' }).eq('id', sessionId);
+  await sb.from('messages').insert({
+    session_id: sessionId,
+    role: 'ai',
+    content:
+      `I went through all ${pageCount} pages and found ` +
+      `${docs.filter((d) => !d.excluded).length} documents. ` +
+      (nonContiguous.length
+        ? `${nonContiguous.length} page(s) belong to a document they are not next to, ` +
+          `which I have joined up. `
+        : '') +
+      `I am now working out what each one is. Documents I am unsure about will ` +
+      `be flagged in the list.`,
+    proposal_revision: saved.revision,
+  });
 }

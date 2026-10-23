@@ -1,4 +1,4 @@
-import { DOC_TYPES } from '@/lib/types';
+import type { Category } from '@/lib/types';
 
 /**
  * The client brief for the matter under assessment.
@@ -37,83 +37,173 @@ are NOT the client:
 `.trim();
 
 /**
- * System prompt for Pass A. Sent as a cached block on every window, so the
- * brief and taxonomy are paid for once rather than 24 times across a bundle —
- * one of the main levers on cost that the challenge asks us to account for.
+ * Pass A — page-level boundary evidence only.
+ *
+ * Deliberately narrow. Pass A's only job is to work out where documents begin
+ * and end; identifying WHAT a document is happens once per assembled document,
+ * with every one of its pages in view. Asking a page in isolation what document
+ * it belongs to produced confident answers from page one of a twelve-page
+ * record, and nothing to correct them.
  */
 export const PASS_A_SYSTEM = `
-You are helping prepare a medico-legal evidence set. An occupational therapist
-has received one large PDF bundle containing many separate documents, and your
-job is to describe each PAGE so the pages can afterwards be grouped back into
-whole documents.
+You are preparing a medico-legal bundle for splitting. An occupational
+therapist has received one large PDF containing many separate documents.
 
-You are NOT summarising the case. You are identifying documents.
+Your ONLY job here is to report evidence about where documents start and stop.
+Do NOT try to categorise anything — that happens later, once whole documents
+have been assembled.
 
 ## The client being assessed
 
 ${CLIENT_BRIEF}
 
-## Document types
-
-Classify each page as exactly one of these types:
-${DOC_TYPES.map((t) => `  - ${t}`).join('\n')}
-
-## How to judge each page
-
-For every page you are shown, report:
+## For every page you are shown, report
 
 - is_blank: true only if the page carries no meaningful content at all. A page
   with a letterhead, a stamp, or a handwritten note is NOT blank.
-- title: a short specific description, e.g. "Work capacity certificate
-  (progress), 23/08/2022" or "GP referral to physiotherapy". Say what the
-  document IS, not what it says.
-- doc_type, doc_date, author, discipline, org: as printed on the page.
-- patient_name_seen: any patient or person name printed on the page, verbatim.
-  This is how documents about other people get caught, so never omit it.
+- gist: ONE short line naming what the page appears to be, e.g.
+  "work capacity certificate, Dr Mehta, 23/08/2022". Used to assemble pages and
+  to shape the category list later. Keep it under 15 words.
+- org: the issuing organisation printed on the page, or null.
+- doc_date: a date printed on the page, DD/MM/YYYY, or null. Used only to group
+  pages of one document.
+- patient_name_seen: any person name printed on the page, verbatim. Never omit
+  this — it is how documents about other people get caught.
 - page_marker: if the page prints something like "Page 2 of 3", report
-  {n: 2, of: 3}. Otherwise null. This is the single most reliable signal for
-  reassembling multi-page documents.
-- has_letterhead: whether the page opens with a letterhead, logo, or masthead.
-  A new letterhead almost always means a NEW document starts here.
+  {n: 2, of: 3}; otherwise null. This is the single most reliable signal that
+  pages belong together.
+- has_letterhead: whether the page opens with a letterhead, logo or masthead.
+  A fresh letterhead almost always means a NEW document starts here.
 - continues_previous: whether this page reads as a continuation of the page
   immediately before it — mid-sentence text, a repeated running header,
-  "continued", a table carrying on, or an unbroken page_marker sequence.
+  "continued", a table carrying on, an unbroken page_marker sequence.
   continues_confidence: 0 to 1.
-- relates: does this page concern the client named above?
-    "yes"        clearly the client
-    "no"         clearly a different person (different name, different DOB)
-    "uncertain"  cannot tell — e.g. a first name only, or no identifiers
-    "n/a"        blank pages and pages with no patient context at all
-  relates_reason: one short clause, required whenever relates is not "yes".
-- review_flags: short phrases for anything a human must look at. Examples:
-  "page rotated 180°", "barely legible fax", "handwritten", "no author",
-  "undated", "incomplete — page 2 of 3 missing", "lists several patients —
-  privacy issue", "pages out of order".
+- review: things a human must check about THIS PAGE, each as
+  {code, message}, where code is one of:
+    illegible, rotated, multiple_patients, low_confidence
+  Use only when the page itself shows the problem.
 - extracted_text: the page's text, as plainly as you can read it. For scanned
-  or handwritten pages this is your OCR of it. Keep it under 1500 characters;
-  it is used for duplicate detection, not for reading back.
-- confidence: 0 to 1, your confidence in this page's classification overall.
+  or handwritten pages this is your reading of the image. Under 1500 characters.
+- confidence: 0 to 1 for this page's reading overall.
 
-## Rules that matter more than completeness
+## Rules
 
-1. A WRONG ANSWER COSTS MORE THAN "unknown". If a field is not legible or not
-   printed, write the string "unknown" — never a plausible guess. Undated
-   documents and unsigned documents are both common and both fine to report as
-   unknown.
-2. A cover sheet is a document in its own right. A fax cover sheet does NOT
-   belong to the pages that follow it.
-3. An enclosure is a separate document from the letter that encloses it, even
-   when it plainly belongs with it.
-4. Never merge what you cannot justify. If you are unsure whether a page
-   continues the previous one, set continues_previous false and lower your
-   confidence — a missed merge is easy for the reviewer to fix, a wrong merge
-   hides a document.
+1. A cover sheet is a document in its own right. A fax cover sheet does NOT
+   belong to the pages that follow it, so continues_previous is false for the
+   page AFTER a cover sheet.
+2. An enclosure is a separate document from the letter enclosing it.
+3. Never assert a merge you cannot justify. If you are unsure whether a page
+   continues the previous one, say false and lower your confidence. A missed
+   merge is one click for the reviewer; a wrong merge hides a whole document.
+4. Anything not printed on the page is unknown. Do not infer it.
 
 Report on every page you are given, in order, and on no others.
 `.trim();
 
 /**
- * System prompt for feedback rounds.
+ * Pass C0 — derive the category set.
+ *
+ * Run once, after documents are assembled, with a one-line gist of every
+ * document in the bundle. Deriving the taxonomy in a single call with the whole
+ * bundle in view is what keeps it coherent: categorising documents one at a
+ * time against an open-ended vocabulary produces three spellings of the same
+ * category by the end of a long bundle.
+ */
+export const TAXONOMY_SYSTEM = `
+You are designing the category list for a document register.
+
+You will be shown a one-line description of every document found in one
+medico-legal bundle. Propose the set of categories that best organises THIS
+bundle, for an occupational therapist who needs to find things in it later.
+
+## What makes a good set
+
+- Between 8 and 18 categories. Fewer than 8 and the register stops being
+  useful; more than 18 and it becomes a list of individual documents.
+- Each category should hold several documents. If only one document would ever
+  fall in a category, it belongs inside a broader one.
+- Names should be what a clinician would say: short noun phrases, title case,
+  no jargon invented for the occasion.
+- Categories must not overlap. A document should have one obvious home.
+- Distinguish by WHAT A DOCUMENT IS, never by who it is about, how legible it
+  is, or whether it is a duplicate. Those are recorded separately.
+- Always include a category named exactly "Excluded" for blank or contentless
+  pages, and one named exactly "Other" for documents fitting nothing else.
+
+Give each category a one-line description saying what belongs in it, written so
+someone else could sort documents the same way you would.
+`.trim();
+
+/** Render the active taxonomy for a prompt. */
+export function renderCategories(categories: Category[]): string {
+  if (!categories.length) return '(none defined yet)';
+  return categories
+    .filter((c) => c.active)
+    .map((c) => `  - ${c.name}: ${c.description}`)
+    .join('\n');
+}
+
+/**
+ * Pass C — categorise ONE assembled document.
+ *
+ * Every page of the document is attached, so a twelve-page record is judged as
+ * a twelve-page record. Non-contiguous documents arrive here as just their own
+ * pages, with any intruding page left out.
+ */
+export function categoriseSystem(categories: Category[]): string {
+  return `
+You categorise ONE document from a medico-legal bundle. Read its text and fill
+every field.
+
+RULE: Never guess. If a value is not written in the document, use "unknown".
+
+## The client being assessed
+
+${CLIENT_BRIEF}
+
+## STEPS
+
+1. overview: 2 lines — what it is, who wrote it, about whom, when.
+2. category: pick from CATEGORIES below, using the overview.
+   If none fits (medical or non-medical), use "Other" and suggest a short new
+   name in proposed_category with a one-line reason.
+3. subcategory: short specific type (e.g. MRI, payslip, discharge instructions).
+4. desc: plain English, max 15 words. Mention if it is a copy, fax or draft.
+5. date: date written or issued, DD/MM/YYYY.
+   Running records spanning time → "DD/MM/YYYY - DD/MM/YYYY".
+6. author (who wrote or signed it), discipline (their profession),
+   org (issuing organisation).
+7. relates — compare the people named in the document with the CLIENT BRIEF:
+     yes       = about the client (older records still count)
+     no        = a different person, even with the same surname, address or
+                 employer
+     uncertain = not enough identifiers, or several patients listed
+   Give relates_reason naming the identifiers you actually compared
+   (for example "name and DOB match", or "surname matches but first name is
+   Kylie and no DOB given").
+8. review: flags a human must check, each {code, message} with a one-line
+   message. code is one of:
+     missing_pages, incomplete, illegible, rotated, no_author, no_date,
+     relates_uncertain, multiple_patients, possible_copy, low_confidence
+   Use possible_copy when the document looks like a file copy, fax copy or
+   re-scan of something else — stamps, fax headers, "copy" markings.
+9. confidence: 0 to 1.
+
+## NOTES
+
+- A fax cover sheet or enclosure is its own document; describe only it, not
+  whatever it covers or encloses.
+- A blank page → category "Excluded", relates "n/a".
+- Do not describe pages that are not in this document.
+
+## CATEGORIES (name: description)
+
+${renderCategories(categories)}
+`.trim();
+}
+
+/**
+ * Feedback rounds.
  *
  * Deliberately never sees the bundle itself — only the current document
  * register. A revision is a small edit to an existing proposal, so re-reading
@@ -151,8 +241,9 @@ ${CLIENT_BRIEF}
     Record the true reading order when the original's pages are out of order.
     Must list exactly that document's pages.
 - {"op":"set_meta","doc":"D012","fields":{"title":"…","doc_type":"…",
-   "doc_date":"…","author":"…","discipline":"…","org":"…","relates":"no",
-   "relates_reason":"…","dup_of":"D053","review_flags":["…"]}}
+   "subcategory":"…","doc_date":"…","author":"…","discipline":"…","org":"…",
+   "relates":"no","relates_reason":"…","dup_of":"D053",
+   "review":[{"code":"possible_copy","message":"…"}]}}
     Correct what a document IS, without moving any pages.
 
 ## Rules

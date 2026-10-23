@@ -93,7 +93,7 @@ const PAGES = 192;
   check('split head is 24-29', head.pages.join() === '24,25,26,27,28,29', head.pages.join());
   check('split tail is 30-35', tail.pages.join() === '30,31,32,33,34,35', tail.pages.join());
   check('split keeps proposal valid', validateProposal(split, PAGES).ok);
-  check('split tail flagged for review', tail.review_flags.length > 0);
+  check('split tail flagged for review', tail.review.length > 0);
 }
 
 // --------------------------------------------------- reorder (answer-key D086)

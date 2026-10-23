@@ -29,6 +29,7 @@ export interface ProposalDiff {
 const META_FIELDS: (keyof DocMeta)[] = [
   'title',
   'doc_type',
+  'subcategory',
   'doc_date',
   'author',
   'discipline',

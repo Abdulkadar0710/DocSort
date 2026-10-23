@@ -1,4 +1,4 @@
-import type { DocMeta, Op, ProposalDoc } from '@/lib/types';
+import type { DocMeta, Op, ProposalDoc, ReviewFlag } from '@/lib/types';
 
 /**
  * The op engine. Every change to a proposal — whether the AI produced it from
@@ -19,8 +19,12 @@ const EXCLUDED_TYPE = 'Excluded';
 
 function blankMeta(): DocMeta {
   return {
+    overview: null,
     title: null,
     doc_type: null,
+    subcategory: null,
+    proposed_category: null,
+    proposed_category_reason: null,
     doc_date: null,
     author: null,
     discipline: null,
@@ -28,10 +32,17 @@ function blankMeta(): DocMeta {
     relates: 'unknown',
     relates_reason: null,
     dup_of: null,
-    review_flags: [],
+    review: [],
     confidence: null,
     excluded: false,
   };
+}
+
+/** Union two flag lists, keeping one entry per code. */
+function mergeReview(a: ReviewFlag[], b: ReviewFlag[]): ReviewFlag[] {
+  const by = new Map<string, ReviewFlag>();
+  for (const f of [...a, ...b]) if (!by.has(f.code)) by.set(f.code, f);
+  return [...by.values()];
 }
 
 function nextKey(docs: ProposalDoc[], taken: Set<string>): string {
@@ -62,12 +73,13 @@ function makeDoc(
 
 function excludedDoc(key: string, page: number, reason: string): ProposalDoc {
   return makeDoc(key, [page], {
+    overview: `Page ${page} carries no document content.`,
     title: 'Excluded page',
     doc_type: EXCLUDED_TYPE,
     doc_date: null,
     relates: 'n/a',
     excluded: true,
-    review_flags: [reason],
+    review: [{ code: 'low_confidence', message: reason }],
     confidence: 1,
   });
 }
@@ -93,7 +105,7 @@ export function applyOps(input: ProposalDoc[], ops: Op[]): ApplyResult {
   let docs: ProposalDoc[] = input.map((d) => ({
     ...d,
     pages: [...d.pages],
-    review_flags: [...d.review_flags],
+    review: d.review.map((f) => ({ ...f })),
   }));
   const rejected: ApplyResult['rejected'] = [];
   const taken = new Set<string>(docs.map((d) => d.doc_key));
@@ -124,7 +136,12 @@ export function applyOps(input: ProposalDoc[], ops: Op[]): ApplyResult {
               ...blankMeta(),
               doc_type: doc.doc_type,
               org: doc.org,
-              review_flags: ['Created by split; metadata needs review'],
+              review: [
+                {
+                  code: 'low_confidence',
+                  message: 'Created by splitting another document; details need checking',
+                },
+              ],
             }),
           );
           break;
@@ -142,9 +159,7 @@ export function applyOps(input: ProposalDoc[], ops: Op[]): ApplyResult {
           const [keep, ...rest] = targets;
           for (const r of rest) {
             keep.pages.push(...r.pages);
-            for (const f of r.review_flags) {
-              if (!keep.review_flags.includes(f)) keep.review_flags.push(f);
-            }
+            keep.review = mergeReview(keep.review, r.review);
           }
           keep.pages.sort((a, b) => a - b);
           keep.excluded = targets.every((t) => t.excluded);
@@ -158,7 +173,12 @@ export function applyOps(input: ProposalDoc[], ops: Op[]): ApplyResult {
           if (op.to === 'new') {
             docs.push(
               makeDoc(nextKey(docs, taken), [...op.pages].sort((a, b) => a - b), {
-                review_flags: ['Created by move; metadata needs review'],
+                review: [
+                  {
+                    code: 'low_confidence',
+                    message: 'Created by moving pages; details need checking',
+                  },
+                ],
               }),
             );
           } else {
@@ -185,7 +205,12 @@ export function applyOps(input: ProposalDoc[], ops: Op[]): ApplyResult {
           for (const p of [...op.pages].sort((a, b) => a - b)) {
             docs.push(
               makeDoc(nextKey(docs, taken), [p], {
-                review_flags: ['Re-included by reviewer; metadata needs review'],
+                review: [
+                  {
+                    code: 'low_confidence',
+                    message: 'Re-included by the reviewer; details need checking',
+                  },
+                ],
               }),
             );
           }

@@ -2,7 +2,7 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { claude, MODEL_CAREFUL, readUsage, toolResult, type Usage } from './claude';
 import { FEEDBACK_SYSTEM } from './prompts';
 import { summariseRuns } from '@/lib/proposal/validate';
-import type { Op, OpsResponse, ProposalDoc } from '@/lib/types';
+import { REVIEW_CODES, type Op, type OpsResponse, type ProposalDoc } from '@/lib/types';
 
 /**
  * Turn a reviewer's plain-language feedback into edit operations.
@@ -62,6 +62,7 @@ const EDIT_TOOL: Anthropic.Tool = {
               properties: {
                 title: { type: 'string' },
                 doc_type: { type: 'string' },
+                subcategory: { type: 'string' },
                 doc_date: { type: 'string' },
                 author: { type: 'string' },
                 discipline: { type: 'string' },
@@ -69,7 +70,17 @@ const EDIT_TOOL: Anthropic.Tool = {
                 relates: { type: 'string', enum: ['yes', 'no', 'uncertain', 'n/a'] },
                 relates_reason: { type: 'string' },
                 dup_of: { type: 'string' },
-                review_flags: { type: 'array', items: { type: 'string' } },
+                review: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    required: ['code', 'message'],
+                    properties: {
+                      code: { type: 'string', enum: REVIEW_CODES as unknown as string[] },
+                      message: { type: 'string' },
+                    },
+                  },
+                },
                 excluded: { type: 'boolean' },
               },
             },
@@ -95,7 +106,10 @@ export function renderRegister(docs: ProposalDoc[]): string {
         d.org ?? 'organisation unknown',
         d.relates !== 'yes' ? `client: ${d.relates}` : null,
         d.dup_of ? `duplicate of ${d.dup_of}` : null,
-        d.review_flags.length ? `flags: ${d.review_flags.join(', ')}` : null,
+        d.subcategory ? `subtype ${d.subcategory}` : null,
+        d.review.length
+          ? `flags: ${d.review.map((f) => `${f.code} (${f.message})`).join('; ')}`
+          : null,
       ].filter(Boolean);
       return `- ${bits.join(' | ')}`;
     })

@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { Proposal, ProposalDoc } from '@/lib/types';
+import type { Proposal, ProposalDoc, ReviewFlag } from '@/lib/types';
+import { cleanReview } from '@/lib/types';
 import { validateProposal } from './validate';
 
 /**
@@ -24,8 +25,12 @@ interface DocRow {
   relates: ProposalDoc['relates'];
   relates_reason: string | null;
   dup_of: string | null;
-  review_flags: string[];
+  review: ReviewFlag[] | null;
   confidence: number | null;
+  overview: string | null;
+  subcategory: string | null;
+  proposed_category: string | null;
+  proposed_category_reason: string | null;
   excluded: boolean;
   sort_order: number | null;
   document_pages: { page_number: number; position: number }[];
@@ -47,7 +52,11 @@ function rowToDoc(r: DocRow): ProposalDoc {
     relates: r.relates ?? 'unknown',
     relates_reason: r.relates_reason,
     dup_of: r.dup_of,
-    review_flags: r.review_flags ?? [],
+    review: cleanReview(r.review),
+    overview: r.overview,
+    subcategory: r.subcategory,
+    proposed_category: r.proposed_category,
+    proposed_category_reason: r.proposed_category_reason,
     confidence: r.confidence,
     excluded: r.excluded,
     sort_order: r.sort_order ?? 0,
@@ -57,7 +66,8 @@ function rowToDoc(r: DocRow): ProposalDoc {
 
 const DOC_SELECT = `
   id, doc_key, title, doc_type, doc_date, author, discipline, org,
-  relates, relates_reason, dup_of, review_flags, confidence, excluded, sort_order,
+  relates, relates_reason, dup_of, review, confidence, excluded, sort_order,
+  overview, subcategory, proposed_category, proposed_category_reason,
   document_pages ( page_number, position )
 `;
 
@@ -155,7 +165,11 @@ export async function saveRevision(
         relates: d.relates,
         relates_reason: d.relates_reason,
         dup_of: d.dup_of,
-        review_flags: d.review_flags,
+        review: d.review,
+        overview: d.overview,
+        subcategory: d.subcategory,
+        proposed_category: d.proposed_category,
+        proposed_category_reason: d.proposed_category_reason,
         confidence: d.confidence,
         excluded: d.excluded,
         sort_order: i,
