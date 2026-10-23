@@ -69,10 +69,37 @@ export async function GET(
     .select('kind, status')
     .eq('session_id', id);
 
+
   const progress = (jobs ?? []).reduce<Record<string, number>>((acc, j) => {
     acc[j.status] = (acc[j.status] ?? 0) + 1;
     return acc;
   }, {});
+
+  /**
+   * Progress by phase rather than one undifferentiated count.
+   *
+   * The phases are not comparable units of work — a classify window reads ten
+   * pages, a categorise job reads one document — so "14 of 19 jobs" tells a
+   * waiting reviewer nothing. Reported separately, the UI can say which stage
+   * it is in and how far through that stage it is, which is the question
+   * somebody watching a progress bar is actually asking.
+   */
+  const countPhase = (kind: string) => {
+    const of = (jobs ?? []).filter((j) => j.kind === kind);
+    return {
+      total: of.length,
+      done: of.filter((j) => j.status === 'done').length,
+      failed: of.filter((j) => j.status === 'failed').length,
+      pending: of.filter((j) => j.status === 'pending' || j.status === 'running').length,
+    };
+  };
+
+  const phases = {
+    classify: countPhase('classify'),
+    taxonomy: countPhase('taxonomy'),
+    categorise: countPhase('categorise'),
+    group: countPhase('group'),
+  };
 
   const { data: outputs } = await sb
     .from('outputs')
@@ -101,6 +128,7 @@ export async function GET(
       done: progress.done ?? 0,
       failed: progress.failed ?? 0,
       pending: (progress.pending ?? 0) + (progress.running ?? 0),
+      phases,
     },
     // Who the bundle turned out to be about, so the register can be read as
     // whole people rather than a flat list.

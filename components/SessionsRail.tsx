@@ -78,7 +78,13 @@ export function SessionsRail({ currentId }: { currentId: string }) {
                     month: 'short',
                   })}
                   {' · '}
-                  {s.status === 'approved' ? 'approved' : 'awaiting approval'}
+                  {s.status === 'approved'
+                    ? 'approved'
+                    : s.status === 'cancelled'
+                      ? 'cancelled'
+                      : s.status === 'failed'
+                        ? 'failed'
+                        : 'awaiting approval'}
                 </p>
               </Link>
             </li>

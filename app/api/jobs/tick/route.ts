@@ -77,6 +77,22 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'session is not ready' }, { status: 409 });
   }
 
+  // A cancelled session does no further work, and this is the only place that
+  // can enforce it. Cancelling marks the queued jobs, but each phase creates
+  // the next phase's jobs as it completes — so without this guard a tick still
+  // in flight would queue the whole categorise pass moments after the reviewer
+  // stopped it, and then set the session back to 'proposed' on its way out.
+  if (session.status === 'cancelled') {
+    return NextResponse.json({
+      ok: true,
+      idle: true,
+      cancelled: true,
+      done: 0,
+      remaining: 0,
+      total: 0,
+    });
+  }
+
   // --------------------------------------------------------- claim a job
   // Strictly in phase order: a categorise job must not run before the taxonomy
   // it files against exists.
@@ -159,6 +175,30 @@ export async function POST(req: Request) {
   }
 
   // --------------------------------------------- advance between phases
+  //
+  // Re-read the status before writing anything. The check at the top of this
+  // request is not enough: a tick that began while the session was still
+  // running can take half a minute on a model call, and the reviewer may have
+  // cancelled in the meantime. Without this, that in-flight tick would queue
+  // the next phase and set the session back to 'proposed' seconds after it was
+  // stopped — which is exactly what it did.
+  const { data: fresh } = await sb
+    .from('sessions')
+    .select('status')
+    .eq('id', sessionId)
+    .single();
+
+  if (fresh?.status === 'cancelled') {
+    return NextResponse.json({
+      ok: true,
+      idle: true,
+      cancelled: true,
+      done: 0,
+      remaining: 0,
+      total: 0,
+    });
+  }
+
   const { data: all } = await sb
     .from('jobs')
     .select('kind, status, window_start, window_end, result')

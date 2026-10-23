@@ -6,6 +6,8 @@ import { BundleViewer, type PageOrder, type ViewerPage } from '@/components/Bund
 import { DocumentSidebar, type PersonSummary } from '@/components/DocumentSidebar';
 import { FeedbackPanel } from '@/components/FeedbackPanel';
 import { SessionsRail } from '@/components/SessionsRail';
+import { ProcessingOverlay, type Phases } from '@/components/ProcessingOverlay';
+import { useRouter } from 'next/navigation';
 import type { Proposal } from '@/lib/types';
 import type { ValidationResult } from '@/lib/proposal/validate';
 
@@ -38,7 +40,13 @@ interface SessionPayload {
   }[];
   outputs: { id: string; kind: string; filename: string; page_count: number | null }[];
   people: PersonSummary[];
-  progress: { total: number; done: number; failed: number; pending: number };
+  progress: {
+    total: number;
+    done: number;
+    failed: number;
+    pending: number;
+    phases: Phases;
+  };
   ocr: { scannedTotal: number; done: number; needsOcr: number[] };
   validation: ValidationResult | null;
 }
@@ -78,6 +86,7 @@ const ocrStarted = new Set<string>();
 const MAX_TICK_PASSES = 200;
 
 export function Workspace({ sessionId: id }: { sessionId: string }) {
+  const router = useRouter();
   const [data, setData] = useState<SessionPayload | null>(null);
   const [error, setError] = useState('');
   const [activePage, setActivePage] = useState<number | null>(null);
@@ -123,6 +132,9 @@ export function Workspace({ sessionId: id }: { sessionId: string }) {
       for (let pass = 0; pass < MAX_TICK_PASSES; pass++) {
         const current = await load();
         if (!current || current.progress.pending === 0) break;
+        // A reviewer who cancelled is not waiting for anything; stop asking
+        // the server for more work.
+        if (current.session.status === 'cancelled') break;
 
         const results = await Promise.all(
           Array.from({ length: TICK_CONCURRENCY }, () =>
@@ -192,6 +204,14 @@ export function Workspace({ sessionId: id }: { sessionId: string }) {
     setScrollTo({ page, nonce: Date.now() });
   }, []);
 
+  const cancel = useCallback(async () => {
+    await fetch(`/api/sessions/${id}/cancel`, { method: 'POST' });
+    // Clear the guard so reopening this session can resume the windows that
+    // were never started.
+    driving.delete(id);
+    router.push('/');
+  }, [id, router]);
+
   const approve = useCallback(async () => {
     setApproving(true);
     setApproveError('');
@@ -232,11 +252,14 @@ export function Workspace({ sessionId: id }: { sessionId: string }) {
 
   const { session, bundleUrl, proposal, pages, validation, progress } = data;
   const people = data.people ?? [];
+  // Block the workspace while the split is still being decided: everything on
+  // screen describes a proposal the next phase is about to rewrite.
+  const busy = progress.pending > 0 && session.status !== 'cancelled' && !stalled;
   const processing = progress.pending > 0;
   const approved = session.status === 'approved';
 
   return (
-    <main className="flex h-dvh flex-col bg-white dark:bg-slate-900">
+    <main className="relative flex h-dvh flex-col bg-white dark:bg-slate-900">
       <header className="shrink-0 border-b border-slate-200 dark:border-slate-800">
         <div className="flex items-center gap-3 px-4 py-2.5">
           <h1 className="shrink-0 truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
@@ -309,7 +332,7 @@ export function Workspace({ sessionId: id }: { sessionId: string }) {
             <button
               type="button"
               onClick={() => void approve()}
-              disabled={!proposal || processing || approving || !validation?.ok}
+              disabled={busy || !proposal || processing || approving || !validation?.ok}
               title={
                 validation?.ok
                   ? 'Split the bundle and produce the outputs'
@@ -374,6 +397,14 @@ export function Workspace({ sessionId: id }: { sessionId: string }) {
           onJump={jump}
         />
       </div>
+
+      {busy && progress.phases && (
+        <ProcessingOverlay
+          pageCount={session.page_count}
+          phases={progress.phases}
+          onCancel={cancel}
+        />
+      )}
     </main>
   );
 }

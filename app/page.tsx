@@ -22,6 +22,7 @@ const STATUS_LABEL: Record<string, string> = {
   proposed: 'Awaiting review',
   approved: 'Approved',
   failed: 'Failed',
+  cancelled: 'Cancelled',
 };
 
 const STATUS_STYLE: Record<string, string> = {
@@ -30,6 +31,7 @@ const STATUS_STYLE: Record<string, string> = {
   proposed:
     'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-300',
   failed: 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300',
+  cancelled: 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
 };
 
 export default function Home() {
