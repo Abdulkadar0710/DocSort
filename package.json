@@ -14,7 +14,9 @@
     "score": "tsx scripts/score.ts",
     "test:polyfill": "tsx scripts/test-polyfill.ts",
     "test": "npm run test:ops && npm run test:polyfill && npm run test:stitch",
-    "test:stitch": "tsx scripts/test-stitch.ts"
+    "test:stitch": "tsx scripts/test-stitch.ts",
+    "make:dummy": "tsx scripts/make-dummy-bundle.ts",
+    "make:slice": "tsx scripts/make-test-slice.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.1.0",
