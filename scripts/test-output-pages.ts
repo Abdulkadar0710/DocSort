@@ -2,11 +2,7 @@
  * Assertions for output page numbering.
  *   npx tsx scripts/test-output-pages.ts
  */
-import {
-  assignOutputPages,
-  formatOutputRange,
-  formatProvenance,
-} from '../lib/proposal/outputPages';
+import { assignOutputPages, formatOutputRange } from '../lib/proposal/outputPages';
 
 let pass = 0;
 const fails: string[] = [];
@@ -77,8 +73,6 @@ check('a range reads naturally', formatOutputRange(out.get('D001')) === 'pages 1
 check('a single page reads naturally', formatOutputRange(out.get('D003')) === 'page 5');
 check('an unknown document formats to nothing', formatOutputRange(undefined) === '');
 
-check('provenance keeps the scattered pages', formatProvenance([1, 7]) === 'from bundle p1, 7');
-check('provenance collapses runs', formatProvenance([3, 4, 5]) === 'from bundle p3–5');
 
 // An empty document is never given a number.
 check('an empty document is skipped', !assignOutputPages([doc('Z', [])]).has('Z'));

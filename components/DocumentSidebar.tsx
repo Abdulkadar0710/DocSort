@@ -2,11 +2,7 @@
 
 import { colorFor } from '@/lib/palette';
 import { summariseRuns } from '@/lib/proposal/validate';
-import {
-  assignOutputPages,
-  formatOutputRange,
-  formatProvenance,
-} from '@/lib/proposal/outputPages';
+import { assignOutputPages, formatOutputRange } from '@/lib/proposal/outputPages';
 import { REVIEW_LABELS, SERIOUS_REVIEW_CODES, type ProposalDoc } from '@/lib/types';
 
 export interface PersonSummary {
@@ -161,14 +157,9 @@ export function DocumentSidebar({ docs, people = [], activePage, onJump }: Props
                       excluded · bundle p{summariseRuns(d.pages)}
                     </span>
                   ) : (
-                    <>
-                      <span className="mt-0.5 block truncate text-[11px] text-slate-600 dark:text-slate-300">
-                        {formatOutputRange(outputPages.get(d.doc_key))}
-                      </span>
-                      <span className="block truncate text-[10px] text-slate-400 dark:text-slate-500">
-                        {formatProvenance(d.pages)}
-                      </span>
-                    </>
+                    <span className="mt-0.5 block truncate text-[11px] text-slate-500 dark:text-slate-400">
+                      {formatOutputRange(outputPages.get(d.doc_key))}
+                    </span>
                   )}
 
                   {!d.excluded && (d.doc_type || d.title) && (

@@ -1,5 +1,3 @@
-import { summariseRuns } from './validate';
-
 /**
  * Where each document sits in the OUTPUT, as opposed to where its pages sat in
  * the original bundle.
@@ -58,11 +56,4 @@ export function assignOutputPages(docs: Numberable[]): Map<string, OutputRange> 
 export function formatOutputRange(r: OutputRange | undefined): string {
   if (!r) return '';
   return r.from === r.to ? `page ${r.from}` : `pages ${r.from}–${r.to}`;
-}
-
-/** "from bundle p1, p7" — the provenance line that sits under the range. */
-export function formatProvenance(pages: number[]): string {
-  if (!pages.length) return '';
-  const runs = summariseRuns(pages);
-  return pages.length === 1 ? `from bundle p${runs}` : `from bundle p${runs}`;
 }
