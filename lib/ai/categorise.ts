@@ -39,7 +39,21 @@ const CATEGORISE_TOOL: Anthropic.Tool = {
   description: 'Report every field for this one document.',
   input_schema: {
     type: 'object',
-    required: ['overview', 'category', 'desc', 'relates', 'relates_reason', 'confidence'],
+    // person_name and person_dob are REQUIRED, not optional. Left optional the
+    // model simply omitted the date of birth, which costs the one identifier
+    // that reliably separates two people sharing a surname and an address.
+    // Required, it answers "unknown" when the page prints none — which is
+    // itself information, and is handled.
+    required: [
+      'overview',
+      'category',
+      'desc',
+      'person_name',
+      'person_dob',
+      'relates',
+      'relates_reason',
+      'confidence',
+    ],
     properties: {
       overview: { type: 'string', description: 'Two lines: what, who wrote it, about whom, when.' },
       category: { type: 'string', description: 'Exactly one of the CATEGORIES names.' },

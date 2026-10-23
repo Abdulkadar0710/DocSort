@@ -234,6 +234,14 @@ ${clientBriefText(client)}
      relates_uncertain, multiple_patients, possible_copy, low_confidence
    Use possible_copy when the document looks like a file copy, fax copy or
    re-scan of something else — stamps, fax headers, "copy" markings.
+
+   multiple_patients means THIS DOCUMENT names several different patients at
+   once — a ward handover sheet listing eight people, a lab batch report, a
+   roster. It does NOT mean the document is about someone other than the
+   client. A record belonging wholly to one person is never
+   multiple_patients, however clearly that person is not the client: say so
+   in relates and relates_reason, which is what they are for. Do not raise a
+   flag to repeat what those fields already say.
 10. confidence: 0 to 1.
 
 ## NOTES

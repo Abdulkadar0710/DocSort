@@ -369,6 +369,14 @@ async function runCategorise(
       org: meta.org,
       relates: meta.relates,
       relates_reason: meta.relates_reason,
+      // Who the document is about, read from the whole document rather than
+      // from a single page's name scan. Omitting these here meant the
+      // categorise pass computed them and threw them away: the register fell
+      // back to Pass A's per-page name sighting, which never reads a date of
+      // birth — losing the one identifier that reliably separates two people
+      // who share a surname and an address.
+      person_name: meta.person_name,
+      person_dob: meta.person_dob,
       review: meta.review,
       confidence: meta.confidence,
     })
@@ -415,14 +423,24 @@ async function runGrouping(
           ? ('yes' as const)
           : ('no' as const);
 
-    // Drop the per-document "identity uncertain" flag once identity has been
-    // settled. Leaving it on every row made the register look like fifteen
-    // problems when there was really one answered question — and buried the
-    // flags that do need a human.
-    const review =
-      relates === 'uncertain' || !identified
-        ? d.review
-        : d.review.filter((f) => f.code !== 'relates_uncertain');
+    // Drop flags that identity has now answered.
+    //
+    // Two were being raised on nearly every row of a multi-person bundle:
+    // relates_uncertain, settled the moment the person was identified; and
+    // multiple_patients, which the model used to mean "a different patient
+    // from the client" when it means "this one document names several
+    // patients at once". A record resolved to exactly one identified person
+    // cannot be the latter, whoever that person turns out to be — and saying
+    // "not the client" on fifteen rows under a header that already says it
+    // buries the flags that do need a human.
+    const answered = new Set<string>();
+    if (identified) {
+      answered.add('multiple_patients');
+      if (relates !== 'uncertain') answered.add('relates_uncertain');
+    }
+    const review = answered.size
+      ? d.review.filter((f) => !answered.has(f.code))
+      : d.review;
 
     return { ...d, relates, review };
   });
