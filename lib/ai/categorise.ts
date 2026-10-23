@@ -272,6 +272,9 @@ export async function categoriseDocument(opts: {
       relates,
       relates_reason: orNull(raw.relates_reason),
       person_name: orNull(raw.person_name),
+    // What the page said. person_name is overwritten later with the label
+    // clustering settles on; this keeps the original for the reviewer.
+    person_name_printed: orNull(raw.person_name),
       person_dob: orNull(raw.person_dob),
       // Assigned by clustering once every document has been read, so that
       // spelling variants of one person collapse rather than each becoming

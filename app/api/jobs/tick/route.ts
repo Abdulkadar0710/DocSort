@@ -10,7 +10,7 @@ import { fetchBundle, sliceForModel, slicePagesForModel } from '@/lib/pdf/slice'
 import { isAuthoritative, planWindows } from '@/lib/ai/windows';
 import { loadProposal, saveRevision } from '@/lib/proposal/store';
 import { groupByCategory } from '@/lib/proposal/group';
-import { clusterPeople, UNIDENTIFIED } from '@/lib/proposal/people';
+import { clusterPeople, MATCH_NEAR, UNIDENTIFIED } from '@/lib/proposal/people';
 import { summariseRuns } from '@/lib/proposal/validate';
 import type { PageSignals } from '@/lib/types';
 
@@ -440,6 +440,11 @@ async function runGrouping(
   // Marsh" become one group rather than two, and a differing date of birth
   // always splits — which is what keeps a relative with the same surname from
   // being absorbed into the client.
+  // Clustering replaces each document's person_name with its group's label, so
+  // keep what the page actually printed — that is the half of "matched X to Y"
+  // a reviewer cannot otherwise recover.
+  const printedName = new Map(current.docs.map((d) => [d.doc_key, d.person_name]));
+
   const clustered = clusterPeople(
     current.docs.map((d) => ({ ...d })),
     client,
@@ -481,6 +486,21 @@ async function runGrouping(
     const review = answered.size
       ? d.review.filter((f) => !answered.has(f.code))
       : d.review;
+
+    // A person reached by spelling alone is said out loud. The name on this
+    // page was not the name we matched it to — it was close enough that
+    // splitting the person in two would have been worse, but close is not the
+    // same as confirmed, and a reviewer is entitled to see which merges rested
+    // on that. Exact matches and ones a date of birth settled say nothing,
+    // because there is nothing to doubt.
+    if (d.identity_tier === MATCH_NEAR && identified && !review.some((f) => f.code === 'identity_spelling')) {
+      review.push({
+        code: 'identity_spelling',
+        message:
+          `Printed as "${printedName.get(d.doc_key) ?? d.person_name}", matched to ${group.name} on spelling. ` +
+          `No date of birth confirmed it.`,
+      });
+    }
 
     return { ...d, relates, review };
   });

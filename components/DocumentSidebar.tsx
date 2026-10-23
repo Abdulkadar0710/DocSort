@@ -12,6 +12,8 @@ export interface PersonSummary {
   isClient: boolean;
   docKeys: string[];
   pages: number[];
+  /** Other spellings of this name found in the bundle. */
+  variants?: string[];
 }
 
 interface Props {
@@ -117,6 +119,23 @@ export function DocumentSidebar({ docs, people = [], activePage, onJump }: Props
                     {person?.pages.length ?? 0}p
                   </span>
                 </div>
+              )}
+
+              {/* The other spellings this person's name was printed under.
+                  Shown because the merge is a judgement: a reviewer who thinks
+                  these are two people needs to see what was on the pages, and
+                  cannot get that from the label we picked. */}
+              {startsPerson && !!person?.variants?.length && (
+                <p
+                  className={`truncate border-b px-3 pb-1.5 text-[9px] italic ${
+                    person.isClient
+                      ? 'border-slate-200 bg-slate-100 text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400'
+                      : 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-400'
+                  }`}
+                  title={person.variants.join('; ')}
+                >
+                  also printed as {person.variants.join('; ')}
+                </p>
               )}
 
               <button

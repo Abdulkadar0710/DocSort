@@ -220,6 +220,17 @@ ${clientBriefText(client)}
    birth if stated. Not the author, not the signatory, not a witness — the
    person the record concerns. If the document names nobody, use "unknown";
    never infer a person from context.
+
+   Report the name as printed. Do NOT tidy the spelling, expand an initial or
+   reconcile it with the client brief — variant spellings are matched up
+   afterwards, and that only works if you report what is actually on the page.
+
+   Where a name is given by relationship — "w/o" (wife of), "s/o", "d/o",
+   "c/o" — the subject is the name BEFORE the marker. In "Gouri w/o Amit
+   Solanki" the record is about Gouri, not Amit. Give person_name as the
+   subject with the shared surname, here "Gouri Solanki", and mention the
+   relative in relates_reason. Folding the whole phrase into person_name files
+   the record under the wrong person.
 8. relates — compare that person with the CLIENT BRIEF:
      yes       = about the client (older records still count)
      no        = a different person, even with the same surname, address or

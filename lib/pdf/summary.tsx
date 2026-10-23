@@ -278,7 +278,8 @@ function SummaryDoc(input: SummaryInput) {
             <Text style={[styles.th, { width: 70 }]}>Date of birth</Text>
             <Text style={[styles.th, { width: 60 }]}>Documents</Text>
             <Text style={[styles.th, { width: 50 }]}>Pages</Text>
-            <Text style={[styles.th, { flex: 1 }]}>Bundle pages</Text>
+            <Text style={[styles.th, { width: 140 }]}>Bundle pages</Text>
+            <Text style={[styles.th, { flex: 1 }]}>Also printed as</Text>
           </View>
 
           {input.people.map((p) => (
@@ -290,7 +291,13 @@ function SummaryDoc(input: SummaryInput) {
               <Text style={[styles.td, { width: 70 }]}>{dash(p.dob)}</Text>
               <Text style={[styles.td, { width: 60 }]}>{p.docKeys.length}</Text>
               <Text style={[styles.td, { width: 50 }]}>{p.pages.length}</Text>
-              <Text style={[styles.td, { flex: 1 }]}>{summariseRuns(p.pages)}</Text>
+              <Text style={[styles.td, { width: 140 }]}>{summariseRuns(p.pages)}</Text>
+              {/* Every spelling this person's name appeared under. A reviewer
+                  who disagrees that these are one person needs to see what was
+                  actually on the pages, not just the label we chose. */}
+              <Text style={[styles.td, { flex: 1 }, styles.muted]}>
+                {p.variants.length ? p.variants.join('; ') : '—'}
+              </Text>
             </View>
           ))}
 
@@ -300,6 +307,9 @@ function SummaryDoc(input: SummaryInput) {
             hold several is a disclosure problem as much as a filing one. The
             pages belonging to anyone other than the client are listed above so
             they can be dealt with deliberately rather than discovered later.
+            {input.people.some((p) => p.variants.length)
+              ? ' Where one person\u2019s name was printed several ways, the variants are listed so the grouping can be checked rather than taken on trust; any that rested on spelling alone also carry a flag in the register.'
+              : ''}
             {input.people.some((p) => p.key === UNIDENTIFIED)
               ? ' Pages naming nobody are grouped as an unidentified person rather than guessed at.'
               : ''}

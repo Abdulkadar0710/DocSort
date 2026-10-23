@@ -125,10 +125,19 @@ export function groupByCategory(
       pages: pages.length,
     });
 
+    // Every spelling the merged documents were printed under, kept together.
+    // Merging is the one place a person's variant names can be destroyed: the
+    // representative keeps its own name and the rest are discarded, so a
+    // bundle that printed one person four ways would report only one of them.
+    const printed = [
+      ...new Set(ordered.map((d) => d.person_name_printed ?? d.person_name).filter(Boolean)),
+    ] as string[];
+
     out.push({
       ...first,
       id: `new:${category}`,
       pages,
+      person_name_printed: printed.length ? printed.join('; ') : null,
       overview:
         `${ordered.length} ${category.toLowerCase()} for ` +
         `${first.person_name ?? 'an unidentified person'}` +

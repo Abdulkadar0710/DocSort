@@ -29,6 +29,7 @@ function doc(
     doc_key: key,
     pages: [page],
     sort_order: 0,
+    person_name_printed: over.person_name ?? null,
     overview: null,
     title: type,
     doc_type: type,

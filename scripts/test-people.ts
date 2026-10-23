@@ -4,7 +4,13 @@
  */
 import {
   clusterPeople,
+  matchTier,
+  MATCH_EXACT,
+  MATCH_NEAR,
+  MATCH_SPELLING,
+  NO_MATCH,
   normaliseDob,
+  parseName,
   personFolder,
   samePerson,
   UNIDENTIFIED,
@@ -116,6 +122,98 @@ check('unidentified gets its own folder', personFolder(people[3]) === 'Unidentif
   check('with no client named, none is marked', anon.every((p) => !p.isClient));
   check('and the people are still found', anon.length === 4);
 }
+
+// ------------------------------------------------- spelling and relationships
+//
+// One person, several spellings. Transliteration varies, scanners drop
+// letters, and some records name somebody only by their relationship to
+// somebody else. Each must reach the client typed at the start of the session.
+
+const gauri = { name: 'Gauri Solanki', dob: null };
+const tier = (n: string, dob: string | null = null) => matchTier(gauri, { name: n, dob });
+
+check('an identical name is an exact match', tier('Gauri Solanki') === MATCH_EXACT);
+check('surname-first still exact', tier('SOLANKI, Gauri') === MATCH_EXACT);
+check('a transliteration variant matches on spelling', tier('Gouri Solanki') === MATCH_SPELLING, String(tier('Gouri Solanki')));
+check('another vowel variant matches on spelling', tier('Gowri Solanki') === MATCH_SPELLING);
+check('a dropped letter in both parts is a near miss', tier('Gori Solank') === MATCH_NEAR, String(tier('Gori Solank')));
+
+// The defect this feature exists to fix: "w/o" means wife of, so the subject
+// is the name BEFORE it. Reading the whole phrase as one name matched the
+// husband better than the wife and filed her records under him.
+check(
+  'a relationship marker resolves to the subject',
+  parseName('Gouri w/o Amit Solanki').subject.join(' ') === 'gouri solanki',
+  parseName('Gouri w/o Amit Solanki').subject.join(' '),
+);
+check('the relative is kept separately', parseName('Gouri w/o Amit Solanki').relative.join(' ') === 'amit solanki');
+check('"wife of" spelled out works too', parseName('Gouri wife of Amit Solanki').subject.join(' ') === 'gouri solanki');
+check('s/o resolves to the son', parseName('Rahul s/o Amit Solanki').subject.join(' ') === 'rahul solanki');
+check('a name with no marker is unchanged', parseName('Amit Solanki').subject.join(' ') === 'amit solanki');
+check('the subject matches the client', tier('Gouri w/o Amit Solanki') === MATCH_SPELLING, String(tier('Gouri w/o Amit Solanki')));
+check(
+  'and does NOT match the husband named in it',
+  matchTier({ name: 'Gouri w/o Amit Solanki', dob: null }, { name: 'Amit Solanki', dob: null }) === NO_MATCH,
+);
+
+// Loosening on spelling must not loosen on identity.
+check('a different given name is a different person', tier('Amit Solanki') === NO_MATCH);
+check('a surname two letters out is a different family', tier('Gauri Solankar') === NO_MATCH);
+check('an unrelated surname never matches', tier('Gauri Sharma') === NO_MATCH);
+check('Marsh is not Marsden', matchTier({ name: 'Daniel Marsh', dob: null }, { name: 'Daniel Marsden', dob: null }) === NO_MATCH);
+
+// A date of birth outranks spelling in both directions.
+// A date of birth on one side only is not a disagreement. Most pages print
+// no date of birth at all, and treating an absent one as a conflict would
+// split nearly every person in the bundle.
+check('a date of birth on one side only changes nothing', tier('Gori Solank', '01/02/1990') === MATCH_NEAR);
+check(
+  'a date of birth on both sides promotes a near miss out of flagging',
+  matchTier({ name: 'Gauri Solanki', dob: '01/02/1990' }, { name: 'Gori Solank', dob: '01/02/1990' }) === MATCH_SPELLING,
+);
+check(
+  'a differing date of birth splits even an identical name',
+  matchTier({ name: 'Gauri Solanki', dob: '01/02/1990' }, { name: 'Gauri Solanki', dob: '03/04/1985' }) === NO_MATCH,
+);
+
+// Clustering end to end: the variants collapse, the husband does not.
+const spelt = clusterPeople(
+  [
+    { doc_key: 'D001', pages: [1], person_name: 'Gauri Solanki', person_dob: null },
+    { doc_key: 'D002', pages: [2], person_name: 'Gori Solank', person_dob: null },
+    { doc_key: 'D003', pages: [3], person_name: 'Gouri w/o Amit Solanki', person_dob: null },
+    { doc_key: 'D004', pages: [4], person_name: 'Amit Solanki', person_dob: null },
+    { doc_key: 'D005', pages: [5], person_name: null, person_dob: null },
+  ],
+  { name: 'Gauri Solanki', dob: null },
+);
+const gauriGroup = spelt.people.find((p) => p.isClient)!;
+const keyOf = (k: string) => spelt.docs.find((d) => d.doc_key === k)!.person_key;
+
+check('three spellings cluster as one person', gauriGroup.docKeys.join() === 'D001,D002,D003', gauriGroup.docKeys.join());
+check('the husband is his own person', keyOf('D004') !== keyOf('D001'));
+check('the client keeps the name the reviewer typed', gauriGroup.name === 'Gauri Solanki', gauriGroup.name);
+check(
+  'every variant spelling is recorded',
+  gauriGroup.variants.join('; ') === 'Gori Solank; Gouri w/o Amit Solanki',
+  gauriGroup.variants.join('; '),
+);
+check('three groups: the client, the husband and the unidentified', spelt.people.length === 3, String(spelt.people.length));
+
+// Only the genuinely doubtful merge is flagged. Flagging the transliteration
+// variant too would bury it: a bundle of forty such pages would flag all forty.
+const tierOf = (k: string) => spelt.docs.find((d) => d.doc_key === k)!.identity_tier;
+check('the exact spelling is not flagged', tierOf('D001') === MATCH_EXACT);
+check('the near miss is flagged', tierOf('D002') === MATCH_NEAR, String(tierOf('D002')));
+check('the transliteration variant is not flagged', tierOf('D003') === MATCH_SPELLING, String(tierOf('D003')));
+
+// A client nobody matched must not leave an empty group in the register.
+const absent = clusterPeople(
+  [{ doc_key: 'D001', pages: [1], person_name: 'Amit Solanki', person_dob: null }],
+  { name: 'Gauri Solanki', dob: null },
+);
+check('a client with no documents is not listed', absent.people.length === 1, String(absent.people.length));
+check('and nobody is wrongly marked the client', absent.people.every((p) => !p.isClient));
 
 console.log(`\n${pass} passed, ${fails.length} failed`);
 if (fails.length) {

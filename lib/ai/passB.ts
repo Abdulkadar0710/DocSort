@@ -1,4 +1,5 @@
 import type { PageSignals, ProposalDoc, ReviewFlag } from '@/lib/types';
+import { matchTier, nameTokens, NO_MATCH } from '@/lib/proposal/people';
 
 /**
  * Pass B — group described pages into whole documents.
@@ -212,6 +213,7 @@ export function stitch(signals: PageSignals[]): StitchResult {
       relates_reason: null,
       // Filled in by the categorise pass, which reads the whole document.
       person_name: blank ? null : (head.patient_name_seen?.split(/[,;]/)[0]?.trim() ?? null),
+      person_name_printed: blank ? null : (head.patient_name_seen?.split(/[,;]/)[0]?.trim() ?? null),
       person_dob: null,
       person_key: null,
       dup_of: null,
@@ -222,6 +224,12 @@ export function stitch(signals: PageSignals[]): StitchResult {
   });
 
   return { docs, decisions };
+}
+
+/** The clustering matcher, applied to bare token lists. Pass A reads names off
+ *  a page and never sees a date of birth, so there is none to pass. */
+function tokensSamePerson(a: string[], b: string[]): boolean {
+  return matchTier({ name: a.join(' '), dob: null }, { name: b.join(' '), dob: null }) < NO_MATCH;
 }
 
 /**
@@ -237,40 +245,48 @@ export function stitch(signals: PageSignals[]): StitchResult {
  * Matching is per person rather than per word, because a shared surname is not
  * a shared person: the DEV bundle contains the client's partner, Kylie Anne
  * Marsh, precisely to catch a system that matches on surname alone.
+ *
+ * It uses the same comparison as the clustering pass, so a spelling variant
+ * that counts as one person there counts as one person here too. Two matchers
+ * drifting apart would mean a page could be stitched into a document and then
+ * filed under somebody else.
  */
 function namesConflict(a: string | null, b: string | null): boolean {
   const left = parsePeople(a);
   const right = parsePeople(b);
   if (!left.length || !right.length) return false;
-  return !left.some((x) => right.some((y) => samePerson(x, y)));
+  return !left.some((x) => right.some((y) => tokensSamePerson(x, y)));
 }
 
-/** Split "Daniel James Marsh, Craig Dunlop" into per-person token sets. */
+/**
+ * Split "Daniel James Marsh, Craig Dunlop" into the people it names.
+ *
+ * Note what is NOT a separator: the slash. An earlier version split on it,
+ * which tore "Gouri w/o Amit Solanki" into "gouri w" and "o amit solanki" —
+ * two people, neither of them real. Relationship markers are the one place a
+ * slash appears inside a name, and parseName below understands them.
+ */
 function parsePeople(raw: string | null): string[][] {
   if (!raw) return [];
   return raw
-    .split(/[,;]|\band\b|\//i)
-    .map((part) =>
-      part
-        .toLowerCase()
-        .replace(/\b(mr|mrs|ms|miss|dr|prof|sr|jr)\b/g, '')
-        .replace(/\([^)]*\)/g, '')
-        .replace(/[^a-z\s]/g, '')
-        .split(/\s+/)
-        .filter((t) => t.length > 1),
-    )
+    .split(/[;]|\band\b/i)
+    .flatMap((part) => splitOnCommas(part))
+    .map((part) => nameTokens(part.replace(/\([^)]*\)/g, '')))
     .filter((tokens) => tokens.length > 0);
 }
 
-/** "Daniel James Marsh" and "Daniel Marsh" are one person; "Kylie Anne Marsh"
- *  is not, despite the surname. Two shared name parts, or containment. */
-function samePerson(a: string[], b: string[]): boolean {
-  const xs = new Set(a);
-  const ys = new Set(b);
-  const shared = [...xs].filter((t) => ys.has(t));
-  if (!shared.length) return false;
-  if (shared.length === xs.size || shared.length === ys.size) return true;
-  return shared.length >= 2;
+/**
+ * A comma separates two people — except when it is the surname-first form a lab
+ * report prints, "MARSH, Daniel James", which is one. Two parts either side of
+ * a single comma, no other commas: treat it as one person and let parseName
+ * sort out the order.
+ */
+function splitOnCommas(part: string): string[] {
+  const bits = part.split(',');
+  if (bits.length === 2 && bits.every((b) => b.trim().split(/\s+/).length <= 3)) {
+    return [part];
+  }
+  return bits;
 }
 
 function sameish(a: string, b: string): boolean {

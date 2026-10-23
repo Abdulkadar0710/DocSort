@@ -52,6 +52,7 @@ export const REVIEW_CODES = [
   'relates_uncertain',
   'multiple_patients',
   'possible_copy',
+  'identity_spelling',
   'low_confidence',
 ] as const;
 
@@ -73,6 +74,7 @@ export const REVIEW_LABELS: Record<ReviewCode, string> = {
   relates_uncertain: 'Identity uncertain',
   multiple_patients: 'Several patients',
   possible_copy: 'Possible copy',
+  identity_spelling: 'Name matched on spelling',
   low_confidence: 'Low confidence',
 };
 
@@ -105,8 +107,13 @@ export interface DocMeta {
   relates: Relates;
   /** Must name the identifiers compared, not just assert a conclusion. */
   relates_reason: string | null;
-  /** Who the document is about, as printed. */
+  /** Who the document is about — the agreed label for that person, once
+   *  clustering has reconciled the spellings found across the bundle. */
   person_name: string | null;
+  /** The same name as it was actually printed on the page. Kept because the
+   *  reconciliation above is a judgement, and a reviewer cannot check it
+   *  against a name we have already overwritten. */
+  person_name_printed: string | null;
   person_dob: string | null;
   /** Normalised identity used to group by person; set by clustering. */
   person_key: string | null;

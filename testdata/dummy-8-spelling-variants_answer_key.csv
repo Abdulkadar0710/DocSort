@@ -1,0 +1,9 @@
+id,pages,n,type,desc,date,author,discipline,org,relates,dup,review,note,fmt
+D001,1,1,Prescriptions,Prescription for analgesia following workplace back injury,09/08/2022,Dr Anil Mehta,General practice,Northbank Medical Centre,yes,,,,Digital (text layer)
+D002,2,1,Receipts,Receipt for MRI lumbar spine scan fee,18/03/2024,Westgate Imaging,Radiology,Westgate Imaging,no,,Belongs to a different person,,Digital (text layer)
+D003,3,1,Imaging Reports,MRI lumbar spine report showing post-operative changes at L4/5,18/03/2024,Dr Helen Cho,Radiology,Westgate Imaging,yes,,,,Digital (text layer)
+D004,4,1,Imaging Reports,"X-ray chest report, pre-operative screening",05/11/2022,Dr Helen Cho,Radiology,Westgate Imaging,no,,Belongs to a different person,,Digital (text layer)
+D005,5,1,Prescriptions,Post-operative prescription for pain relief and constipation,15/11/2022,Dr Marcus Reid,Orthopaedic surgery,Meridian Orthopaedics,yes,,,,Digital (text layer)
+D006,6,1,Imaging Reports,"X-ray lumbar spine report, AP and lateral views",22/08/2022,Dr Helen Cho,Radiology,Westgate Imaging,yes,,,,Digital (text layer)
+D007,7,1,Receipts,Receipt for general practice consultation fee,12/03/2024,Northbank Medical Centre,General practice,Northbank Medical Centre,yes,,,,Digital (text layer)
+D008,8,1,Prescriptions,"Prescription for neuropathic pain, dose increase",20/01/2023,Dr Marcus Reid,Orthopaedic surgery,Meridian Orthopaedics,yes,,,,Digital (text layer)

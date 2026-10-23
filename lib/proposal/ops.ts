@@ -32,6 +32,7 @@ function blankMeta(): DocMeta {
     relates: 'unknown',
     relates_reason: null,
     person_name: null,
+    person_name_printed: null,
     person_dob: null,
     person_key: null,
     dup_of: null,

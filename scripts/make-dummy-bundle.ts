@@ -521,6 +521,51 @@ function forPerson(
   };
 }
 
+/**
+ * A third bundle for spelling variants: one person whose name is printed four
+ * different ways, plus her husband, who must NOT absorb her records.
+ *
+ * "Gori Solank" is a scanner's reading of "Gauri Solanki" — a dropped letter in
+ * each half. "Gouri" and "Gowri" are ordinary transliteration variants.
+ * "Gouri w/o Amit Solanki" identifies her by her husband, which is the trap:
+ * his full name is in the string, so a matcher that reads the whole phrase
+ * files her record under him.
+ */
+const SOLANKI_VARIANTS = [
+  'Gauri Solanki',
+  'Gori Solank',
+  'Gouri w/o Amit Solanki',
+  'Gowri Solanki',
+];
+
+function spellingVariantDocs(): Doc[] {
+  const pick = (ids: string[]) => ids.map((i) => DOCS.find((d) => d.id === i)!);
+  const hers = pick(['D008', 'D003', 'D009', 'D004', 'D001', 'D010']);
+  const his = pick(['D002', 'D005']);
+
+  const out: Doc[] = [];
+  let n = 1;
+  // Her six documents cycle through the four spellings; his two are
+  // interleaved so neither person forms a tidy block.
+  for (let i = 0; i < hers.length; i++) {
+    out.push(
+      forPerson(hers[i], `D${String(n++).padStart(3, '0')}`, {
+        name: SOLANKI_VARIANTS[i % SOLANKI_VARIANTS.length],
+        dob: '',
+      }, 'yes'),
+    );
+    if (i < his.length) {
+      out.push(
+        forPerson(his[i], `D${String(n++).padStart(3, '0')}`, {
+          name: 'Amit Solanki',
+          dob: '',
+        }, 'no'),
+      );
+    }
+  }
+  return out;
+}
+
 /** 15 documents: 5 for the client, 5 for the partner, 5 for a third person. */
 function multiPersonDocs(): Doc[] {
   const pick = (ids: string[]) => ids.map((i) => DOCS.find((d) => d.id === i)!);
@@ -544,10 +589,15 @@ async function main() {
   // argv[0] is the node binary and argv[1] this script, so only look past them.
   const args = process.argv.slice(2);
   const multi = args.includes('--multi');
+  const spelling = args.includes('--spelling');
   const outName =
     args.find((a) => !a.startsWith('--')) ??
-    (multi ? 'testdata/dummy-15-three-people' : 'testdata/dummy-12-mixed');
-  const docs = multi ? multiPersonDocs() : DOCS;
+    (spelling
+      ? 'testdata/dummy-8-spelling-variants'
+      : multi
+        ? 'testdata/dummy-15-three-people'
+        : 'testdata/dummy-12-mixed');
+  const docs = spelling ? spellingVariantDocs() : multi ? multiPersonDocs() : DOCS;
 
   const pdf = await PDFDocument.create();
   const fonts = {
@@ -559,7 +609,13 @@ async function main() {
   for (const doc of docs) {
     drawPage(pdf.addPage(A4), doc, fonts);
   }
-  pdf.setTitle(multi ? 'Test bundle — three people' : 'Test bundle — mixed records');
+  pdf.setTitle(
+    spelling
+      ? 'Test bundle — one person, four spellings'
+      : multi
+        ? 'Test bundle — three people'
+        : 'Test bundle — mixed records',
+  );
   await writeFile(`${outName}.pdf`, await pdf.save());
 
   const header = [

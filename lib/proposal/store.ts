@@ -25,6 +25,7 @@ interface DocRow {
   relates: ProposalDoc['relates'];
   relates_reason: string | null;
   person_name: string | null;
+  person_name_printed: string | null;
   person_dob: string | null;
   person_key: string | null;
   dup_of: string | null;
@@ -55,6 +56,7 @@ function rowToDoc(r: DocRow): ProposalDoc {
     relates: r.relates ?? 'unknown',
     relates_reason: r.relates_reason,
     person_name: r.person_name,
+    person_name_printed: r.person_name_printed ?? r.person_name,
     person_dob: r.person_dob,
     person_key: r.person_key,
     dup_of: r.dup_of,
@@ -72,7 +74,7 @@ function rowToDoc(r: DocRow): ProposalDoc {
 
 const DOC_SELECT = `
   id, doc_key, title, doc_type, doc_date, author, discipline, org,
-  relates, relates_reason, person_name, person_dob, person_key,
+  relates, relates_reason, person_name, person_name_printed, person_dob, person_key,
   dup_of, review, confidence, excluded, sort_order,
   overview, subcategory, proposed_category, proposed_category_reason,
   document_pages ( page_number, position )
@@ -179,6 +181,7 @@ export async function saveRevision(
         relates: d.relates,
         relates_reason: d.relates_reason,
         person_name: d.person_name,
+        person_name_printed: d.person_name_printed,
         person_dob: d.person_dob,
         person_key: d.person_key,
         dup_of: d.dup_of,

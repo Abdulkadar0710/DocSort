@@ -76,6 +76,7 @@ const docs: ProposalDoc[] = rows.map((r, i) => {
     relates: (r.relates || 'unknown') as ProposalDoc['relates'],
     relates_reason: r.note || null,
     person_name: null,
+    person_name_printed: null,
     person_dob: null,
     person_key: null,
     dup_of: r.dup || null,
