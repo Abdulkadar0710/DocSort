@@ -74,6 +74,19 @@ export async function POST(req: Request) {
     );
   }
 
+  // The client's name is required, not merely helpful. Documents are filed
+  // under a person, and relatedness is decided by comparing the names found in
+  // the bundle against this one; without it every document resolves to an
+  // unidentified person and the grouping is meaningless. Date of birth and
+  // claim number stay optional — they refine the match, they do not enable it.
+  const client_name = body.client_name?.trim();
+  if (!client_name) {
+    return NextResponse.json(
+      { error: 'client_name is required — documents are filed by person' },
+      { status: 400 },
+    );
+  }
+
   const sb = serverClient();
   const { data: session, error } = await sb
     .from('sessions')
@@ -83,7 +96,7 @@ export async function POST(req: Request) {
       status: 'uploading',
       // Who the matter is about. Everything else found in the bundle is
       // reported as another person rather than quietly discarded.
-      client_name: body.client_name?.trim() || null,
+      client_name,
       client_dob: body.client_dob?.trim() || null,
       client_ref: body.client_ref?.trim() || null,
       client_notes: body.client_notes?.trim() || null,

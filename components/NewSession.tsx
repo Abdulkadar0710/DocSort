@@ -31,7 +31,19 @@ export function NewSession() {
 
   const busy = phase !== 'idle' && phase !== 'error';
 
+  // The name is the one thing the pipeline cannot work without. Every document
+  // is filed under a person, and "does this belong to the client?" is answered
+  // by comparing against this name — with it blank, every document in the
+  // bundle resolves to an unidentified person and the whole grouping collapses
+  // into one anonymous pile. Date of birth and claim number only sharpen it.
+  const named = clientName.trim().length > 0;
+
   async function handleFile(file: File) {
+    if (!named) {
+      setPhase('error');
+      setDetail('a full name is needed before a bundle can be read');
+      return;
+    }
     setPhase('uploading');
     setDetail(`Uploading ${file.name} (${(file.size / 1048576).toFixed(1)} MB)`);
     setPct(0);
@@ -120,9 +132,15 @@ export function NewSession() {
           <div className="grid grid-cols-2 gap-2">
             <input
               value={clientName}
-              onChange={(e) => setClientName(e.target.value)}
+              onChange={(e) => {
+                setClientName(e.target.value);
+                if (phase === 'error') setPhase('idle');
+              }}
               disabled={busy}
-              placeholder="Full name"
+              required
+              aria-required="true"
+              aria-label="Full name (required)"
+              placeholder="Full name (required)"
               className="col-span-2 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-900 focus:outline-none disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
             />
             <input
@@ -142,18 +160,27 @@ export function NewSession() {
           </div>
           <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
             Anything in the bundle about somebody else is kept separate and
-            flagged, never discarded. Leave blank if you do not know yet.
+            flagged, never discarded. Date of birth and claim number are
+            optional, but they settle who a document belongs to when two people
+            share a surname.
           </p>
         </div>
 
         <button
           type="button"
-          disabled={busy}
+          disabled={busy || !named}
+          title={named ? undefined : 'Enter the full name first'}
           onClick={() => inputRef.current?.click()}
           className="mt-5 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700 disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
         >
           {busy ? 'Working…' : 'Choose bundle PDF'}
         </button>
+
+        {!busy && !named && (
+          <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+            Enter the full name to continue.
+          </p>
+        )}
 
         {phase !== 'idle' && (
           <div className="mt-5">

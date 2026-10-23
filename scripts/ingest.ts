@@ -36,6 +36,13 @@ function parseArgs(): Args {
     const i = argv.indexOf(flag);
     return i >= 0 ? (argv[i + 1] ?? fallback) : fallback;
   };
+  if (!opt('--client').trim()) {
+    console.error(
+      'A client name is required — documents are filed by person.\n' +
+        '  tsx scripts/ingest.ts <bundle.pdf> --client "Daniel James Marsh" [--dob 14/03/1984] [--ref UI-22-0815-4471]',
+    );
+    process.exit(1);
+  }
   return {
     file,
     base: opt('--base', 'http://localhost:3000'),
@@ -110,8 +117,8 @@ async function main() {
   if (!createRes.ok) throw new Error(`create session: ${await createRes.text()}`);
   const { session, upload } = await createRes.json();
   console.log(
-    `Session ${session.id}` +
-      (args.client ? `  ·  client: ${args.client}${args.dob ? ` (${args.dob})` : ''}` : '  ·  NO CLIENT NAMED (pass --client "Name" --dob DD/MM/YYYY)'),
+    `Session ${session.id}  ·  client: ${args.client}` +
+      (args.dob ? ` (${args.dob})` : '  (no DOB — name alone must separate people)'),
   );
 
   // 2. upload straight to Storage, bypassing the app server entirely
