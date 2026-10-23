@@ -47,7 +47,7 @@ interface SessionPayload {
 const TICK_CONCURRENCY = 3;
 
 /**
- * Which sessions this tab is already driving, or has finished driving.
+ * Which sessions this tab is already driving.
  *
  * Module scope on purpose. A useRef guard resets on every remount, and React
  * remounts this tree readily — in development it mounts effects twice, and any
@@ -55,8 +55,17 @@ const TICK_CONCURRENCY = 3;
  * remount started another queue driver, and because every pass refreshes the
  * session the result was a self-sustaining request storm against the server.
  * Keyed by session id, this survives remounts and cannot start twice.
+ *
+ * The driver deliberately does NOT stop when the effect is cleaned up. React's
+ * development double-mount cleans up immediately after the first run, and an
+ * earlier version aborted the loop there — while the module guard stopped the
+ * second run from restarting it. The queue got exactly one pass and then sat
+ * untouched. Identifying a bundle is work that should finish once started, so
+ * it now runs to completion independently of whether the component is still
+ * mounted; the entry is cleared at the end so a later visit can resume any
+ * windows left over.
  */
-const driving = new Map<string, 'running' | 'finished'>();
+const driving = new Set<string>();
 
 /** Sessions whose OCR pass this tab has already started. Same remount-proofing
  *  as the queue driver — starting two tesseract workers would halve throughput
@@ -99,14 +108,11 @@ export function Workspace({ sessionId: id }: { sessionId: string }) {
   // when the queue cannot advance at all (no API key, every window failed) that
   // restart becomes an endless request loop against the server.
   useEffect(() => {
-    if (driving.get(id)) return;
-    driving.set(id, 'running');
-    let stopped = false;
+    if (driving.has(id)) return;
+    driving.add(id);
 
     (async () => {
       for (let pass = 0; pass < MAX_TICK_PASSES; pass++) {
-        if (stopped) break;
-
         const current = await load();
         if (!current || current.progress.pending === 0) break;
 
@@ -132,14 +138,10 @@ export function Workspace({ sessionId: id }: { sessionId: string }) {
         if (results.every((r) => r.idle)) break;
       }
       await load();
-      // Deliberately left as 'finished' rather than cleared: the queue is
-      // settled (or stalled), and a remount must not start it over.
-      driving.set(id, 'finished');
+      // Cleared so that reopening this session can pick up any windows that
+      // failed or were left pending.
+      driving.delete(id);
     })();
-
-    return () => {
-      stopped = true;
-    };
   }, [id, load]);
 
   // Make scanned pages searchable, quietly, in the background.

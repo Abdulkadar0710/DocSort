@@ -1,0 +1,5 @@
+id,pages,n,type,desc,date,author,discipline,org,relates,dup,review,note,fmt
+D056,1,1,Medical or work capacity certificate,"Work capacity certificate (progress), no capacity 22/11/2022–20/12/2022",22/11/2022,Dr Anil Mehta,General practice,Northbank Medical Centre,yes,,,,Scanned image (OCR needed)
+D057,2,1,Specialist report,Spinal surgeon post-operative review letter,13/12/2022,Dr Marcus Reid,Orthopaedic / spinal surgery,Meridian Orthopaedics,yes,,,,Digital (text layer)
+D058,"3, 5",2,Allied health notes,Physiotherapy progress report to GP / insurer,17/01/2023,Tom Breslin,Physiotherapy,Harbour Physio,yes,,Pages not contiguous — interleaved with another document,,Digital (text layer)
+D059,4,1,Pathology results,Iron studies for Kylie Marsh (client's partner),03/05/2023,Dr Imogen Hale,Pathology,Coastline Pathology,no,,,"Different person: same surname and address as the client, but first name, date of birth and sex differ",Digital (text layer)

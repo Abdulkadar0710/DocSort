@@ -112,6 +112,13 @@ export async function buildChildPdfs(
   const children: ChildPdf[] = [];
 
   for (const doc of docs) {
+    // Ground rule #1 is an either/or: a page appears in exactly one child PDF,
+    // OR it is listed in the summary PDF as excluded. Writing a child PDF for
+    // an excluded page would satisfy neither reading — it would hand the
+    // clinician a blank document in their evidence set while still claiming the
+    // page was set aside. Excluded pages are accounted for in the summary.
+    if (doc.excluded) continue;
+
     const out = await PDFDocument.create();
 
     out.setTitle(doc.title || doc.doc_type || doc.doc_key);

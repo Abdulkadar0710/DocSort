@@ -184,19 +184,24 @@ export async function POST(req: Request) {
       .update({ status: 'approved', approved_at: approvedAt.toISOString(), error: null })
       .eq('id', sessionId);
 
+    const excludedCount = proposal.docs.filter((d) => d.excluded).length;
     await sb.from('messages').insert({
       session_id: sessionId,
       role: 'system',
       content:
         `Split approved. ${children.length} documents produced from ` +
-        `${session.page_count} pages, with a summary PDF.`,
+        `${session.page_count} pages` +
+        (excludedCount
+          ? `, with ${excludedCount} page(s) excluded and listed in the summary`
+          : '') +
+        `, plus a summary PDF.`,
       proposal_revision: proposal.revision,
     });
 
     return NextResponse.json({
       ok: true,
       documents: children.length,
-      excluded: proposal.docs.filter((d) => d.excluded).length,
+      excluded: excludedCount,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

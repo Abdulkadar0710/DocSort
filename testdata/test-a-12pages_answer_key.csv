@@ -1,0 +1,9 @@
+id,pages,n,type,desc,date,author,discipline,org,relates,dup,review,note,fmt
+D001,1-2,2,Legal correspondence,Letter of instruction from solicitor to OT,05/02/2024,Sarah Okafor,Solicitor,Ashford Lane Lawyers,yes,,,,Digital (text layer)
+D002,3,1,Legal correspondence,Expert witness code of conduct (enclosure to letter of instruction),unknown,unknown,Legal,Ashford Lane Lawyers (enclosure),yes,,Undated; no author,Enclosure that belongs with the letter of instruction but is a separate document,Digital (text layer)
+D003,4,1,Insurer correspondence,Fax cover sheet from insurer to solicitor,18/01/2024,Rachel Kim,Insurance case manager,Unity Insurance,yes,,,A cover sheet is a document in its own right; it does not belong to the pages that follow,Fax image (OCR needed)
+D004,5-7,3,Claim or insurer form,Workers' compensation claim form completed by worker,10/08/2022,Daniel Marsh,Worker (claimant),Unity Insurance (form),yes,,,,Scanned image (OCR needed)
+D005,8-9,2,Employment record,Employer incident / injury report,08/08/2022,Craig Dunlop,Supervisor,Brightline Logistics Pty Ltd,yes,,,,Scanned image (OCR needed)
+D006,10,1,Employment record,Handwritten witness statement (co-worker),09/08/2022,Liam Turner,Forklift operator (co-worker),Brightline Logistics Pty Ltd,yes,,,,"Handwritten, scanned (OCR needed)"
+D007,11,1,Excluded,Blank page,—,unknown,—,—,n/a,,,Blank page; belongs to no document,Scanned image
+D008,12,1,Insurer correspondence,Insurer notice of decision — claim accepted,30/08/2022,Rachel Kim,Insurance case manager,Unity Insurance,yes,,,,Digital (text layer)
