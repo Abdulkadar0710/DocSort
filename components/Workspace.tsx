@@ -85,6 +85,9 @@ const ocrStarted = new Set<string>();
 /** Safety net: a queue that somehow never settles still stops. */
 const MAX_TICK_PASSES = 200;
 
+/** How long the OCR pass will wait for identification to finish: 200 × 3s. */
+const OCR_WAIT_PASSES = 200;
+
 export function Workspace({ sessionId: id }: { sessionId: string }) {
   const router = useRouter();
   const [data, setData] = useState<SessionPayload | null>(null);
@@ -170,35 +173,62 @@ export function Workspace({ sessionId: id }: { sessionId: string }) {
   // reviewer can refine and approve while it is still running. It exists only
   // so the exported child PDFs carry an invisible text layer — tesseract
   // reports where each word sits, which vision does not.
+  //
+  // Keyed on the session alone, and it reads the page list itself rather than
+  // taking it from `data`. Depending on `data` meant this effect tore down and
+  // restarted on every poll, and its cleanup aborted the pass each time — so
+  // the OCR never got past its first page. Same trap, and same fix, as the
+  // queue driver above. For the same reason the pass is not aborted on
+  // unmount: a reviewer glancing at another session should not silently throw
+  // away minutes of completed work, and the module-scoped guard is what stops
+  // a second worker starting.
   useEffect(() => {
-    if (!data || ocrStarted.has(id)) return;
-    if (!data.bundleUrl || !data.ocr?.needsOcr.length) return;
-
+    if (ocrStarted.has(id)) return;
     ocrStarted.add(id);
-    const controller = new AbortController();
-    const pending = data.ocr.needsOcr;
-    const bundleUrl = data.bundleUrl;
 
     void (async () => {
       try {
+        // Wait out identification before competing for the CPU with it: both
+        // run in this tab, and a reviewer wants the split decided first.
+        // Searchability can arrive late; the proposal cannot.
+        let payload: SessionPayload | null = null;
+        for (let i = 0; i < OCR_WAIT_PASSES; i++) {
+          const res = await fetch(`/api/sessions/${id}`);
+          if (!res.ok) return;
+          payload = await res.json();
+          const status = payload?.session.status;
+          if (status === 'cancelled' || status === 'failed') return;
+          if (status !== 'uploading' && status !== 'inventorying' && status !== 'processing') break;
+          await new Promise((r) => setTimeout(r, 3000));
+        }
+
+        const pages = payload?.ocr?.needsOcr ?? [];
+        const bundleUrl = payload?.bundleUrl;
+        if (!bundleUrl || !pages.length) return;
+
         const { runOcrPass } = await import('@/lib/ocr/run');
-        await runOcrPass({
+        const result = await runOcrPass({
           sessionId: id,
           bundleUrl,
-          pages: pending,
-          signal: controller.signal,
+          pages,
           onProgress: ({ done, total }) => setOcrProgress({ done, total }),
         });
+        if (result.failed) {
+          console.warn(
+            `OCR: ${result.completed} of ${pages.length} scanned pages read, ${result.failed} failed. ` +
+              `Those pages export faithfully, just without a text layer.`,
+          );
+        }
       } catch (e) {
         console.error('OCR pass failed', e);
       } finally {
         setOcrProgress(null);
+        // Cleared so reopening the session retries whatever did not finish.
+        ocrStarted.delete(id);
         await load();
       }
     })();
-
-    return () => controller.abort();
-  }, [data, id, load]);
+  }, [id, load]);
 
   const jump = useCallback((page: number) => {
     setScrollTo({ page, nonce: Date.now() });
