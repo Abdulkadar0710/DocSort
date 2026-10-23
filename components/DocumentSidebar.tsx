@@ -2,6 +2,11 @@
 
 import { colorFor } from '@/lib/palette';
 import { summariseRuns } from '@/lib/proposal/validate';
+import {
+  assignOutputPages,
+  formatOutputRange,
+  formatProvenance,
+} from '@/lib/proposal/outputPages';
 import { REVIEW_LABELS, SERIOUS_REVIEW_CODES, type ProposalDoc } from '@/lib/types';
 
 export interface PersonSummary {
@@ -31,6 +36,11 @@ interface Props {
 export function DocumentSidebar({ docs, people = [], activePage, onJump }: Props) {
   const real = docs.filter((d) => !d.excluded).length;
   const identified = docs.filter((d) => !d.excluded && d.doc_type).length;
+
+  // Where each document lands in the exported set. Shown alongside the bundle
+  // pages, never instead of them: the output number is for navigating, the
+  // bundle pages are the provenance the brief turns on.
+  const outputPages = assignOutputPages(docs);
 
   // Same page-order colour index the preview uses, so a document's swatch here
   // matches its rule over there. The register itself is ordered by person.
@@ -146,12 +156,20 @@ export function DocumentSidebar({ docs, people = [], activePage, onJump }: Props
                     )}
                   </span>
 
-                  <span className="mt-0.5 block truncate text-[11px] text-slate-500 dark:text-slate-400">
-                    {d.pages.length === 1
-                      ? `page ${d.pages[0]}`
-                      : `pages ${summariseRuns(d.pages)}`}
-                    {d.excluded ? ' · excluded' : ''}
-                  </span>
+                  {d.excluded ? (
+                    <span className="mt-0.5 block truncate text-[11px] text-slate-500 dark:text-slate-400">
+                      excluded · bundle p{summariseRuns(d.pages)}
+                    </span>
+                  ) : (
+                    <>
+                      <span className="mt-0.5 block truncate text-[11px] text-slate-600 dark:text-slate-300">
+                        {formatOutputRange(outputPages.get(d.doc_key))}
+                      </span>
+                      <span className="block truncate text-[10px] text-slate-400 dark:text-slate-500">
+                        {formatProvenance(d.pages)}
+                      </span>
+                    </>
+                  )}
 
                   {!d.excluded && (d.doc_type || d.title) && (
                     <span className="mt-0.5 block truncate text-[11px] text-slate-400 dark:text-slate-500">

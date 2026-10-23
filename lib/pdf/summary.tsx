@@ -10,6 +10,7 @@ import {
 import { REVIEW_LABELS, type Category, type ProposalDoc } from '@/lib/types';
 import { UNIDENTIFIED, type PersonGroup } from '@/lib/proposal/people';
 import { summariseRuns, type ValidationResult } from '@/lib/proposal/validate';
+import { assignOutputPages, formatOutputRange } from '@/lib/proposal/outputPages';
 
 /**
  * The summary PDF.
@@ -38,8 +39,8 @@ const styles = StyleSheet.create({
   th: { fontFamily: 'Helvetica-Bold', fontSize: 6.5 },
   td: { fontSize: 6.8, paddingRight: 3 },
 
-  cId: { width: 28 }, cPg: { width: 42 }, cTy: { width: 76 }, cSub: { width: 54 },
-  cDesc: { width: 126 }, cDt: { width: 56 }, cAu: { width: 72 }, cOrg: { width: 70 },
+  cId: { width: 28 }, cOut: { width: 40 }, cPg: { width: 42 }, cTy: { width: 72 }, cSub: { width: 50 },
+  cDesc: { width: 118 }, cDt: { width: 54 }, cAu: { width: 68 }, cOrg: { width: 66 },
   cCl: { width: 32 }, cDup: { width: 28 }, cFlag: { flex: 1 },
 
   muted: { color: '#64748b' },
@@ -88,6 +89,7 @@ function Footer() {
 
 function SummaryDoc(input: SummaryInput) {
   const { docs, pageCount, validation } = input;
+  const outputPages = assignOutputPages(docs);
   const real = docs.filter((d) => !d.excluded);
   const excluded = docs.filter((d) => d.excluded);
   const dups = real.filter((d) => d.dup_of);
@@ -120,6 +122,14 @@ function SummaryDoc(input: SummaryInput) {
           <Stat n={input.feedbackRounds} label="Reviewer revisions" />
         </View>
 
+        <Text style={styles.body}>
+          Two page numbers are given for every document. &quot;Output&quot; is
+          where it sits in the exported set, where a document&apos;s pages are
+          contiguous. &quot;Bundle pages&quot; is where those pages came from in
+          the original, which is often scattered — and which is the number that
+          matters if the origin of a document is ever questioned.
+        </Text>
+
         <Text style={[styles.body, validation.ok ? styles.muted : styles.bad]}>
           {validation.ok
             ? `Page accounting checks out: all ${pageCount} pages of the original appear in exactly one child PDF, or are listed as excluded below. No page is in two documents and none is missing.`
@@ -128,6 +138,7 @@ function SummaryDoc(input: SummaryInput) {
 
         <View style={styles.tHead}>
           <Text style={[styles.th, styles.cId]}>ID</Text>
+          <Text style={[styles.th, styles.cOut]}>Output</Text>
           <Text style={[styles.th, styles.cPg]}>Bundle pages</Text>
           <Text style={[styles.th, styles.cTy]}>Category</Text>
           <Text style={[styles.th, styles.cSub]}>Subtype</Text>
@@ -143,6 +154,9 @@ function SummaryDoc(input: SummaryInput) {
         {docs.map((d) => (
           <View key={d.doc_key} style={styles.tRow} wrap={false}>
             <Text style={[styles.td, styles.cId]}>{d.doc_key}</Text>
+            <Text style={[styles.td, styles.cOut]}>
+              {d.excluded ? '—' : formatOutputRange(outputPages.get(d.doc_key)).replace(/^pages? /, '')}
+            </Text>
             <Text style={[styles.td, styles.cPg]}>{summariseRuns(d.pages)}</Text>
             <Text style={[styles.td, styles.cTy]}>{dash(d.doc_type)}</Text>
             <Text style={[styles.td, styles.cSub]}>{dash(d.subcategory)}</Text>
@@ -165,9 +179,17 @@ function SummaryDoc(input: SummaryInput) {
               {d.relates}
             </Text>
             <Text style={[styles.td, styles.cDup]}>{dash(d.dup_of)}</Text>
+            {/* Only what needs attention. The identity reasoning is shown when
+                a document is NOT plainly the client's — on a confirmed match
+                it is reassurance, not a flag, and filling this column with it
+                on every row buries the entries that do need a human. */}
             <Text style={[styles.td, styles.cFlag, styles.warn]}>
-              {d.review.map((f) => `${REVIEW_LABELS[f.code]}: ${f.message}`).join('; ')}
-              {d.relates_reason ? ` (${d.relates_reason})` : ''}
+              {[
+                ...d.review.map((f) => `${REVIEW_LABELS[f.code]}: ${f.message}`),
+                d.relates !== 'yes' && d.relates_reason ? d.relates_reason : null,
+              ]
+                .filter(Boolean)
+                .join('; ')}
             </Text>
           </View>
         ))}
