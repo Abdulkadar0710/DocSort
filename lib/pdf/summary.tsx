@@ -39,9 +39,9 @@ const styles = StyleSheet.create({
   th: { fontFamily: 'Helvetica-Bold', fontSize: 6.5 },
   td: { fontSize: 6.8, paddingRight: 3 },
 
-  cId: { width: 28 }, cOut: { width: 40 }, cPg: { width: 42 }, cTy: { width: 72 }, cSub: { width: 50 },
-  cDesc: { width: 118 }, cDt: { width: 54 }, cAu: { width: 68 }, cOrg: { width: 66 },
-  cCl: { width: 32 }, cDup: { width: 28 }, cFlag: { flex: 1 },
+  cId: { width: 26 }, cOut: { width: 36 }, cPg: { width: 40 }, cTy: { width: 66 }, cSub: { width: 46 },
+  cDesc: { width: 110 }, cDt: { width: 52 }, cAu: { width: 64 }, cOrg: { width: 62 },
+  cCl: { width: 30 }, cDup: { width: 26 }, cFmt: { width: 56 }, cFlag: { flex: 1 },
 
   muted: { color: '#64748b' },
   warn: { color: '#b45309' },
@@ -61,13 +61,59 @@ export interface SummaryInput {
   ocrPageCount: number;
   /** Of those, how many got an invisible text layer from the browser OCR pass. */
   ocrTextLayerCount: number;
+  /**
+   * Per page: did the original carry a text layer, and did we add one?
+   *
+   * Reported per document in the register, because "can I search this child
+   * PDF?" is a question about the file in front of the reviewer, not about the
+   * bundle as a whole — and a document whose text had to be read off an image
+   * carries more risk of a misread name or date than one read from the file.
+   */
+  pageText: Map<number, { native: boolean; ocrAdded: boolean }>;
   /** The category set derived for this bundle. */
   categories: Category[];
   /** Everyone the bundle turned out to be about. */
   people: PersonGroup[];
 }
 
-const dash = (v: string | null | undefined) => (v && v !== 'unknown' ? v : '—');
+/**
+ * "unknown" and "—" are not the same claim and are not collapsed into one.
+ * "unknown" means the field was looked for and could not be read; "—" means
+ * it does not apply, as on a blank page. Flattening the first into the second
+ * hides the admission the splitting guidelines specifically ask us to make.
+ */
+const dash = (v: string | null | undefined) => (v ? v : '—');
+
+/**
+ * How a document's pages reached us, and whether the exported child PDF is
+ * searchable. Three states, because they carry different consequences:
+ * text read from the file is reliable, text read off an image is not, and a
+ * page with neither cannot be searched at all.
+ */
+function formatOf(
+  pages: number[],
+  pageText: SummaryInput['pageText'],
+): { label: string; needsOcr: boolean } {
+  let native = 0;
+  let added = 0;
+  for (const p of pages) {
+    const t = pageText.get(p);
+    if (t?.native) native++;
+    else if (t?.ocrAdded) added++;
+  }
+  const scanned = pages.length - native;
+  if (scanned === 0) return { label: 'Digital (text layer)', needsOcr: false };
+  if (native > 0) {
+    return {
+      label: `Mixed — ${native} digital, ${scanned} scanned${added ? ` (${added} OCR'd)` : ''}`,
+      needsOcr: true,
+    };
+  }
+  return {
+    label: added === pages.length ? 'Scanned (text layer added)' : 'Scanned (OCR needed)',
+    needsOcr: true,
+  };
+}
 
 function Stat({ n, label }: { n: number | string; label: string }) {
   return (
@@ -99,6 +145,7 @@ function SummaryDoc(input: SummaryInput) {
   const nonContiguous = real.filter(
     (d) => d.pages.length > 1 && d.pages[d.pages.length - 1] - d.pages[0] + 1 !== d.pages.length,
   );
+  const scannedDocs = real.filter((d) => formatOf(d.pages, input.pageText).needsOcr);
 
   return (
     <Document title={`Unbundle summary — ${input.sessionName}`}>
@@ -115,10 +162,14 @@ function SummaryDoc(input: SummaryInput) {
           <Stat n={excluded.length} label="Pages excluded" />
           <Stat n={pageCount} label="Pages in bundle" />
           <Stat n={dups.length} label="Duplicates flagged" />
-          <Stat n={otherPerson.length + uncertain.length} label="Not/maybe the client" />
+          {/* Kept apart rather than summed: "this is somebody else's record"
+              is a finding, "I could not tell whose this is" is an open
+              question, and they need different handling. */}
+          <Stat n={otherPerson.length} label="About another person" />
+          <Stat n={uncertain.length} label="Uncertain identity" />
           <Stat n={flagged.length} label="Flagged for review" />
-          <Stat n={input.ocrPageCount} label="Scanned (no text layer)" />
-          <Stat n={input.ocrTextLayerCount} label="Given a text layer" />
+          <Stat n={scannedDocs.length} label="Scanned / fax (OCR needed)" />
+          <Stat n={`${input.ocrTextLayerCount}/${input.ocrPageCount}`} label="Scanned pages given text" />
           <Stat n={input.feedbackRounds} label="Reviewer revisions" />
         </View>
 
@@ -128,6 +179,15 @@ function SummaryDoc(input: SummaryInput) {
           contiguous. &quot;Bundle pages&quot; is where those pages came from in
           the original, which is often scattered — and which is the number that
           matters if the origin of a document is ever questioned.
+        </Text>
+
+        <Text style={styles.body}>
+          &quot;Format&quot; says where this document&apos;s text came from.
+          Digital pages were read from the file itself and their details are as
+          reliable as the original. Scanned, faxed and handwritten pages had to
+          be read off an image, so names, dates and reference numbers on them
+          are the most likely place for a misreading — and the OCR text layer
+          added on export is an aid to searching, not a transcript to rely on.
         </Text>
 
         <Text style={[styles.body, validation.ok ? styles.muted : styles.bad]}>
@@ -148,6 +208,7 @@ function SummaryDoc(input: SummaryInput) {
           <Text style={[styles.th, styles.cOrg]}>Organisation</Text>
           <Text style={[styles.th, styles.cCl]}>Client?</Text>
           <Text style={[styles.th, styles.cDup]}>Dup of</Text>
+          <Text style={[styles.th, styles.cFmt]}>Format</Text>
           <Text style={[styles.th, styles.cFlag]}>Review flags</Text>
         </View>
 
@@ -179,6 +240,9 @@ function SummaryDoc(input: SummaryInput) {
               {d.relates}
             </Text>
             <Text style={[styles.td, styles.cDup]}>{dash(d.dup_of)}</Text>
+            <Text style={[styles.td, styles.cFmt, styles.muted]}>
+              {formatOf(d.pages, input.pageText).label}
+            </Text>
             {/* Only what needs attention. The identity reasoning is shown when
                 a document is NOT plainly the client's — on a confirmed match
                 it is reassurance, not a flag, and filling this column with it
@@ -251,7 +315,7 @@ function SummaryDoc(input: SummaryInput) {
         <Text style={styles.body}>
           These categories were not taken from a fixed list. They were derived
           from this bundle — every document&apos;s description was read together
-          and a category set proposed to fit what is actually here, theneach
+          and a category set proposed to fit what is actually here, then each
           document was filed against it. A borrowed taxonomy tends not to fit
           the matter at hand; letting each document invent its own produces
           three names for the same thing by the end of a long bundle.

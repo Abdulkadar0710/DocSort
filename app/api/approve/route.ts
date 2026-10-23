@@ -83,15 +83,21 @@ export async function POST(req: Request) {
       .eq('session_id', sessionId);
 
     const ocrByPage = new Map<number, OcrWord[]>();
+    // Per page, so the register can report each document's format rather than
+    // only a bundle-wide total: a reviewer wants to know which of these child
+    // PDFs is searchable and which was read off an image.
+    const pageText = new Map<number, { native: boolean; ocrAdded: boolean }>();
     let ocrPageCount = 0;
     let ocrTextLayerCount = 0;
     for (const r of pageRows ?? []) {
       if (!r.has_text_layer) ocrPageCount++;
       const words = r.ocr_words as OcrWord[] | null;
+      const ocrAdded = !r.has_text_layer && !!words?.length;
       if (words?.length) {
         ocrByPage.set(r.page_number, words);
         if (!r.has_text_layer) ocrTextLayerCount++;
       }
+      pageText.set(r.page_number, { native: !!r.has_text_layer, ocrAdded });
     }
 
     const categories = await loadCategories(sb, { activeOnly: false });
@@ -134,6 +140,7 @@ export async function POST(req: Request) {
       approvedAt,
       ocrPageCount,
       ocrTextLayerCount,
+      pageText,
       categories,
       people,
     });
