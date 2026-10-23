@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { BundleViewer, type ViewerPage } from '@/components/BundleViewer';
+import { BundleViewer, type PageOrder, type ViewerPage } from '@/components/BundleViewer';
 import { DocumentSidebar, type PersonSummary } from '@/components/DocumentSidebar';
 import { FeedbackPanel } from '@/components/FeedbackPanel';
 import { SessionsRail } from '@/components/SessionsRail';
@@ -84,6 +84,10 @@ export function Workspace({ sessionId: id }: { sessionId: string }) {
   const [scrollTo, setScrollTo] = useState<{ page: number; nonce: number }>();
   const [highlight, setHighlight] = useState<number[]>([]);
   const [stalled, setStalled] = useState('');
+  // Output order by default: it is the split the reviewer is being asked to
+  // approve. Bundle order stays a click away because it is the only view that
+  // answers "is this really what I was sent, with nothing missing?".
+  const [pageOrder, setPageOrder] = useState<PageOrder>('output');
   const [approving, setApproving] = useState(false);
   const [approveError, setApproveError] = useState('');
   const [ocrProgress, setOcrProgress] = useState<{ done: number; total: number } | null>(null);
@@ -261,6 +265,33 @@ export function Workspace({ sessionId: id }: { sessionId: string }) {
             </span>
           )}
 
+          <div className="flex shrink-0 overflow-hidden rounded-md border border-slate-300 dark:border-slate-700">
+            {(
+              [
+                ['output', 'Split order'],
+                ['bundle', 'As sent'],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setPageOrder(value)}
+                title={
+                  value === 'output'
+                    ? 'Each document’s pages together, as they will be exported'
+                    : 'The original bundle, front to back, exactly as received'
+                }
+                className={`px-2 py-1 text-[11px] font-medium transition ${
+                  pageOrder === value
+                    ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900'
+                    : 'text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
           {people.length > 1 && (
             <span
               title={people
@@ -316,6 +347,7 @@ export function Workspace({ sessionId: id }: { sessionId: string }) {
               bundleUrl={bundleUrl}
               pages={pages}
               docs={proposal?.docs ?? []}
+              order={pageOrder}
               scrollTo={scrollTo}
               onVisiblePageChange={setActivePage}
               highlightPages={highlight}

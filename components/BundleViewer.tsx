@@ -19,10 +19,18 @@ export interface ViewerPage {
 const RENDER_AHEAD = 6;
 const RENDER_BEHIND = 2;
 
+export type PageOrder = 'output' | 'bundle';
+
 interface Props {
   bundleUrl: string;
   pages: ViewerPage[];
   docs: ProposalDoc[];
+  /**
+   * 'output' walks the pages in register order, so each document's pages sit
+   * together as they will in the exported set. 'bundle' walks the original
+   * from front to back.
+   */
+  order?: PageOrder;
   /** Page to scroll to; bump the nonce to re-trigger the same page. */
   scrollTo?: { page: number; nonce: number };
   onVisiblePageChange?: (page: number) => void;
@@ -47,6 +55,7 @@ export function BundleViewer({
   bundleUrl,
   pages,
   docs,
+  order = 'output',
   scrollTo,
   onVisiblePageChange,
   highlightPages,
@@ -64,12 +73,6 @@ export function BundleViewer({
   // IntersectionObserver does not fire at all while a document is hidden (a
   // background tab, or a restored window).
   const [center, setCenter] = useState(() => pages[0]?.page_number ?? 1);
-
-  const live = useMemo(() => {
-    const set = new Set<number>();
-    for (let p = center - RENDER_BEHIND; p <= center + RENDER_AHEAD; p++) set.add(p);
-    return set;
-  }, [center]);
 
   // page number -> { doc, colour index, position within the document }
   //
@@ -105,6 +108,53 @@ export function BundleViewer({
     () => new Set(highlightPages ?? []),
     [highlightPages],
   );
+
+  /**
+   * The order pages are shown in.
+   *
+   * A document's pages are routinely scattered through the bundle — page 1 and
+   * page 7 can be one letter — so reading the proposal in bundle order means
+   * jumping about to see whether a document holds together. Output order walks
+   * the register instead, putting each document's pages side by side as they
+   * will appear once split.
+   *
+   * Bundle order is kept a click away, because it is the only view that
+   * answers "is this really what I was sent, with nothing missing?" — which is
+   * the check the whole preview exists for.
+   */
+  const shown = useMemo(() => {
+    const byNumber = new Map(pages.map((p) => [p.page_number, p]));
+    if (order === 'bundle') {
+      return [...pages].sort((a, b) => a.page_number - b.page_number);
+    }
+
+    const out: ViewerPage[] = [];
+    const seen = new Set<number>();
+    for (const d of docs) {
+      for (const n of d.pages) {
+        const page = byNumber.get(n);
+        if (page && !seen.has(n)) {
+          seen.add(n);
+          out.push(page);
+        }
+      }
+    }
+    // Any page no document claims is still shown, at the end, rather than
+    // disappearing — the preview must account for every page either way.
+    for (const p of pages) if (!seen.has(p.page_number)) out.push(p);
+    return out;
+  }, [pages, docs, order]);
+
+  // Which pages are worth rasterising: a window around the one in view,
+  // measured along the ORDER SHOWN rather than by page number, since in output
+  // order the next page down the screen is rarely the next number.
+  const live = useMemo(() => {
+    const at = shown.findIndex((p) => p.page_number === center);
+    const from = Math.max(0, (at < 0 ? 0 : at) - RENDER_BEHIND);
+    const to = (at < 0 ? 0 : at) + RENDER_AHEAD;
+    return new Set(shown.slice(from, to + 1).map((p) => p.page_number));
+  }, [shown, center]);
+
 
   useEffect(() => {
     let cancelled = false;
@@ -165,7 +215,12 @@ export function BundleViewer({
           else visible.delete(n);
         }
         if (!visible.size) return;
-        const top = Math.min(...visible);
+        // "Topmost" is a position on screen, not the lowest page number —
+        // in output order those are different things.
+        const rank = new Map(shown.map((p, i) => [p.page_number, i]));
+        const top = [...visible].sort(
+          (a, b) => (rank.get(a) ?? 0) - (rank.get(b) ?? 0),
+        )[0];
         setCenter(top);
         onVisiblePageChange?.(top);
       },
@@ -174,7 +229,7 @@ export function BundleViewer({
 
     for (const el of slotRefs.current.values()) observer.observe(el);
     return () => observer.disconnect();
-  }, [pages.length, onVisiblePageChange]);
+  }, [shown, onVisiblePageChange]);
 
   // Jump to a page when the register is clicked.
   //
@@ -222,7 +277,7 @@ export function BundleViewer({
         </div>
       )}
 
-      {pages.map((p) => {
+      {shown.map((p, shownIndex) => {
         const entry = pageMap.get(p.page_number);
         const color = colorFor(entry?.index ?? 0, entry?.doc.excluded ?? false);
         const isFirst = entry?.pos === 0;
@@ -238,7 +293,7 @@ export function BundleViewer({
           <div key={p.page_number} className="relative mx-auto w-full max-w-[420px]">
             {/* A gap between documents, so a boundary reads even where two
                 neighbouring colours look similar on screen. */}
-            {isFirst && p.page_number !== pages[0].page_number && <div className="h-5" />}
+            {isFirst && shownIndex !== 0 && <div className="h-5" />}
 
             <div className="flex items-stretch gap-2">
               {/* The coloured rule runs down the whole document rather than
@@ -296,7 +351,10 @@ export function BundleViewer({
                 )}
 
                 <span className="absolute bottom-1 right-1.5 z-20 rounded bg-white/85 px-1 text-[9px] font-medium text-slate-500">
-                  p{p.page_number}
+                  {/* Always the ORIGINAL bundle page. In output order the
+                      pages no longer run 1,2,3 down the screen, and this is
+                      the number that ties a page back to what was sent. */}
+                  bundle p{p.page_number}
                   {!p.has_text_layer && !excluded && (
                     <span
                       className="ml-1 opacity-70"
