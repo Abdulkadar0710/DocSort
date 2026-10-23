@@ -19,7 +19,21 @@ import type { Category, ProposalDoc } from '@/lib/types';
  * because this one call shapes how every other document is filed.
  */
 
-const TAXONOMY_TOOL: Anthropic.Tool = {
+/**
+ * How many categories a bundle of this size should have.
+ *
+ * A fixed floor is wrong: asked for at least eight categories to organise four
+ * documents, the model dutifully invented overlapping ones — "Allied Health
+ * Reports" alongside "Physiotherapy Reports" — which is exactly the incoherence
+ * the taxonomy pass exists to prevent. The range has to follow the bundle.
+ */
+export function categoryBudget(docCount: number): { min: number; max: number } {
+  const min = Math.max(3, Math.min(8, Math.ceil(docCount / 3)));
+  const max = Math.max(min + 1, Math.min(18, Math.ceil(docCount / 2)));
+  return { min, max };
+}
+
+const taxonomyTool = (min: number, max: number): Anthropic.Tool => ({
   name: 'propose_categories',
   description: 'Propose the category set for this bundle.',
   input_schema: {
@@ -28,8 +42,8 @@ const TAXONOMY_TOOL: Anthropic.Tool = {
     properties: {
       categories: {
         type: 'array',
-        minItems: 8,
-        maxItems: 18,
+        minItems: min,
+        maxItems: max,
         items: {
           type: 'object',
           required: ['name', 'description'],
@@ -44,7 +58,7 @@ const TAXONOMY_TOOL: Anthropic.Tool = {
       },
     },
   },
-};
+});
 
 /** Fold near-identical names together so "GP Letters" and "GP letter" cannot
  *  both exist. Deliberately crude — it only has to catch spelling drift. */
@@ -125,21 +139,26 @@ export async function deriveTaxonomy(docs: ProposalDoc[]): Promise<TaxonomyResul
     .join('\n');
 
   const blankCount = docs.filter((d) => d.excluded).length;
+  const realCount = docs.length - blankCount;
+  const { min, max } = categoryBudget(realCount);
 
   const res = await claude().messages.create({
     model: MODEL_CAREFUL,
     max_tokens: 4000,
     system: [{ type: 'text', text: TAXONOMY_SYSTEM }],
-    tools: [TAXONOMY_TOOL],
+    tools: [taxonomyTool(min, max)],
     tool_choice: { type: 'tool', name: 'propose_categories' },
     messages: [
       {
         role: 'user',
         content:
-          `This bundle contains ${docs.length} documents` +
-          (blankCount ? `, of which ${blankCount} are blank pages` : '') +
+          `This bundle contains ${realCount} documents` +
+          (blankCount ? ` plus ${blankCount} blank page(s)` : '') +
           `. Here is a one-line description of each:\n\n${listing}\n\n` +
-          `Propose the category set for this bundle.`,
+          `Propose between ${min} and ${max} categories for this bundle — ` +
+          `a set this size is what ${realCount} documents will divide into ` +
+          `without categories that overlap or hold a single document. ` +
+          `"Other" and "Excluded" count towards that total.`,
       },
     ],
   });

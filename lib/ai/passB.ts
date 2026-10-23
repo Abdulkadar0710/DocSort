@@ -72,13 +72,16 @@ export function stitch(signals: PageSignals[]): StitchResult {
     const before = byPage.get(prev)!;
 
     if (cur.is_blank || before.is_blank) continue;
-    // A page naming a different person never joins the one before it.
-    if (namesConflict(before.patient_name_seen, cur.patient_name_seen)) continue;
 
     const anchorPages = members.get(groupOf.get(prev)!)!;
     const head = byPage.get(Math.min(...anchorPages))!;
 
-    // Strongest evidence: an unbroken "Page n of m" sequence.
+    // Strongest evidence: an unbroken "Page n of m" sequence. Checked FIRST and
+    // overriding everything below, because the document says so itself. An
+    // earlier version ran the person-name check ahead of this and lost a
+    // two-page incident report: the supervisor and WHS coordinator who signed
+    // page 2 read as "different people" and vetoed a page 1 of 2 -> page 2 of 2
+    // that could not have been clearer.
     if (
       cur.page_marker &&
       before.page_marker &&
@@ -88,6 +91,9 @@ export function stitch(signals: PageSignals[]): StitchResult {
       join(p, prev, `continues "page ${cur.page_marker.n} of ${cur.page_marker.of}"`, true);
       continue;
     }
+
+    // A page about a demonstrably different person never joins the one before.
+    if (namesConflict(before.patient_name_seen, cur.patient_name_seen)) continue;
 
     // A fresh letterhead means a new document, whatever else the page says.
     if (cur.has_letterhead && !(cur.page_marker && cur.page_marker.n > 1)) continue;
@@ -215,36 +221,52 @@ export function stitch(signals: PageSignals[]): StitchResult {
 }
 
 /**
- * Do two pages name clearly different people?
+ * Do two pages name demonstrably different people, with nobody in common?
  *
- * Only blocks a merge on positive evidence of a conflict. A page with no name
- * on it — most continuation pages — never blocks anything, and a shared
- * surname is not a conflict: the DEV bundle contains the client's partner,
- * Kylie Marsh, precisely to catch a system that matches on surname alone.
+ * Pass A reports EVERY person named on a page, which is what catches a
+ * document about somebody else — but it also picks up authors, signatories and
+ * witnesses. So "the lists differ" means nothing on its own: page 2 of a form
+ * naturally names the supervisor who signed it and not the claimant named on
+ * page 1.
+ *
+ * A conflict therefore requires that the two pages share NO person at all.
+ * Matching is per person rather than per word, because a shared surname is not
+ * a shared person: the DEV bundle contains the client's partner, Kylie Anne
+ * Marsh, precisely to catch a system that matches on surname alone.
  */
 function namesConflict(a: string | null, b: string | null): boolean {
-  if (!a || !b) return false;
-  const tokens = (s: string) =>
-    s
-      .toLowerCase()
-      .replace(/\b(mr|mrs|ms|miss|dr|prof)\b/g, '')
-      .replace(/[^a-z\s]/g, '')
-      .split(/\s+/)
-      .filter((t) => t.length > 1);
+  const left = parsePeople(a);
+  const right = parsePeople(b);
+  if (!left.length || !right.length) return false;
+  return !left.some((x) => right.some((y) => samePerson(x, y)));
+}
 
-  const x = tokens(a);
-  const y = tokens(b);
-  if (!x.length || !y.length) return false;
-  if (x.join(' ') === y.join(' ')) return false;
+/** Split "Daniel James Marsh, Craig Dunlop" into per-person token sets. */
+function parsePeople(raw: string | null): string[][] {
+  if (!raw) return [];
+  return raw
+    .split(/[,;]|\band\b|\//i)
+    .map((part) =>
+      part
+        .toLowerCase()
+        .replace(/\b(mr|mrs|ms|miss|dr|prof|sr|jr)\b/g, '')
+        .replace(/\([^)]*\)/g, '')
+        .replace(/[^a-z\s]/g, '')
+        .split(/\s+/)
+        .filter((t) => t.length > 1),
+    )
+    .filter((tokens) => tokens.length > 0);
+}
 
-  // Same full set of names in any order is the same person.
-  const xs = new Set(x);
-  const ys = new Set(y);
+/** "Daniel James Marsh" and "Daniel Marsh" are one person; "Kylie Anne Marsh"
+ *  is not, despite the surname. Two shared name parts, or containment. */
+function samePerson(a: string[], b: string[]): boolean {
+  const xs = new Set(a);
+  const ys = new Set(b);
   const shared = [...xs].filter((t) => ys.has(t));
-  if (shared.length === Math.min(xs.size, ys.size)) return false;
-
-  // Sharing only the surname while the given names differ is a conflict.
-  return shared.length < Math.min(xs.size, ys.size);
+  if (!shared.length) return false;
+  if (shared.length === xs.size || shared.length === ys.size) return true;
+  return shared.length >= 2;
 }
 
 function sameish(a: string, b: string): boolean {

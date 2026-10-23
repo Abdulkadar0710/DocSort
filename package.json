@@ -13,7 +13,8 @@
     "ingest": "tsx scripts/ingest.ts",
     "score": "tsx scripts/score.ts",
     "test:polyfill": "tsx scripts/test-polyfill.ts",
-    "test": "npm run test:ops && npm run test:polyfill"
+    "test": "npm run test:ops && npm run test:polyfill && npm run test:stitch",
+    "test:stitch": "tsx scripts/test-stitch.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.1.0",

@@ -118,10 +118,14 @@ bundle, for an occupational therapist who needs to find things in it later.
 
 ## What makes a good set
 
-- Between 8 and 18 categories. Fewer than 8 and the register stops being
-  useful; more than 18 and it becomes a list of individual documents.
+- Stay within the number of categories you are asked for. Too few and the
+  register stops being useful; too many and it becomes a list of individual
+  documents rather than a way to find them.
 - Each category should hold several documents. If only one document would ever
   fall in a category, it belongs inside a broader one.
+- Never create two categories one of which could contain the other. "Allied
+  Health Reports" and "Physiotherapy Reports" cannot both exist: pick the level
+  that suits how many documents there actually are.
 - Names should be what a clinician would say: short noun phrases, title case,
   no jargon invented for the occasion.
 - Categories must not overlap. A document should have one obvious home.
@@ -195,6 +199,13 @@ ${CLIENT_BRIEF}
   whatever it covers or encloses.
 - A blank page → category "Excluded", relates "n/a".
 - Do not describe pages that are not in this document.
+- Some documents are NOT contiguous in the bundle: their pages have other
+  people's documents sitting between them. You are given only this document's
+  own pages, already in reading order. That is not a defect and nothing is
+  missing — do NOT flag missing_pages or incomplete merely because the page
+  numbers have gaps. Flag those only when the document's OWN content is cut
+  short: a "page 2 of 3" with no third page, a sentence stopping mid-way with
+  nothing following, a signature block that never arrives.
 
 ## CATEGORIES (name: description)
 
