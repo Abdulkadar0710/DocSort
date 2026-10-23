@@ -39,7 +39,7 @@ export function SessionsRail({ currentId }: { currentId: string }) {
   }, [currentId]);
 
   return (
-    <aside className="flex h-full flex-col border-r border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950">
+    <aside className="flex h-full min-h-0 flex-col overflow-hidden border-r border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950">
       <div className="px-3 py-3">
         <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
           Sessions

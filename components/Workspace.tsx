@@ -331,7 +331,14 @@ export function Workspace({ sessionId: id }: { sessionId: string }) {
 
       {/* Sessions · Documents · Preview · Refine — the four things the reviewer
           moves between, all visible at once so none of them is a detour. */}
-      <div className="grid min-h-0 flex-1 grid-cols-[clamp(130px,11vw,180px)_clamp(150px,13vw,220px)_1fr_clamp(220px,20vw,320px)]">
+      {/* grid-rows-[minmax(0,1fr)] is doing real work here. Without an explicit
+          row the implicit one sizes to its tallest child, so `h-full` on the
+          columns resolved against content rather than the viewport: the Refine
+          panel grew as the conversation did, pushing its own text box past the
+          bottom of the screen and scrolling the whole page instead of the
+          message list. Pinning the row to the available height makes each
+          column scroll inside itself. */}
+      <div className="grid min-h-0 flex-1 grid-cols-[clamp(130px,11vw,180px)_clamp(150px,13vw,220px)_1fr_clamp(220px,20vw,320px)] grid-rows-[minmax(0,1fr)] overflow-hidden">
         <SessionsRail currentId={id} />
 
         <DocumentSidebar
@@ -341,7 +348,7 @@ export function Workspace({ sessionId: id }: { sessionId: string }) {
           onJump={jump}
         />
 
-        <div className="min-h-0">
+        <div className="min-h-0 overflow-hidden">
           {bundleUrl && pages.length > 0 ? (
             <BundleViewer
               bundleUrl={bundleUrl}
