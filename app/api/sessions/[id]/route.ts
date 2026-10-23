@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { serverClient } from '@/lib/supabase';
 import { loadProposal, listRevisions } from '@/lib/proposal/store';
 import { validateProposal } from '@/lib/proposal/validate';
+import { clusterPeople } from '@/lib/proposal/people';
 
 /**
  * GET /api/sessions/:id[?revision=N]
@@ -25,7 +26,7 @@ export async function GET(
 
   const { data: session, error } = await sb
     .from('sessions')
-    .select('id, name, status, page_count, bundle_path, approved_at, created_at, error')
+    .select('id, name, status, page_count, bundle_path, approved_at, created_at, error, client_name, client_dob, client_ref')
     .eq('id', id)
     .single();
   if (error || !session) {
@@ -101,6 +102,14 @@ export async function GET(
       failed: progress.failed ?? 0,
       pending: (progress.pending ?? 0) + (progress.running ?? 0),
     },
+    // Who the bundle turned out to be about, so the register can be read as
+    // whole people rather than a flat list.
+    people: proposal
+      ? clusterPeople(proposal.docs.map((d) => ({ ...d })), {
+          name: session.client_name,
+          dob: session.client_dob,
+        }).people
+      : [],
     validation:
       proposal && session.page_count
         ? validateProposal(proposal.docs, session.page_count)

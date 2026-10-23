@@ -7,6 +7,7 @@ import { fetchBundle } from '@/lib/pdf/slice';
 import { buildChildPdfs } from '@/lib/pdf/export';
 import { renderSummaryPdf } from '@/lib/pdf/summary';
 import { loadCategories } from '@/lib/ai/taxonomy';
+import { clusterPeople, personFolder } from '@/lib/proposal/people';
 import type { OcrWord } from '@/lib/types';
 
 /**
@@ -35,7 +36,7 @@ export async function POST(req: Request) {
 
   const { data: session } = await sb
     .from('sessions')
-    .select('id, name, status, page_count, bundle_path, approved_at')
+    .select('id, name, status, page_count, bundle_path, approved_at, client_name, client_dob')
     .eq('id', sessionId)
     .single();
   if (!session?.bundle_path || !session.page_count) {
@@ -97,7 +98,24 @@ export async function POST(req: Request) {
     const shortLabels = new Map(
       categories.filter((c) => c.short_label).map((c) => [c.name, c.short_label!]),
     );
-    const children = await buildChildPdfs(bundle, proposal.docs, ocrByPage, shortLabels);
+    // Only foldered when the bundle actually holds more than one person —
+    // a single-person matter should not arrive wrapped in a pointless folder.
+    const { people } = clusterPeople(
+      proposal.docs.map((d) => ({ ...d })),
+      { name: session.client_name, dob: session.client_dob },
+    );
+    const personFolders = new Map<string, string>();
+    if (people.length > 1) {
+      for (const p of people) personFolders.set(p.key, personFolder(p));
+    }
+
+    const children = await buildChildPdfs(
+      bundle,
+      proposal.docs,
+      ocrByPage,
+      shortLabels,
+      personFolders,
+    );
 
     const { count: feedbackRounds } = await sb
       .from('messages')
@@ -117,6 +135,7 @@ export async function POST(req: Request) {
       ocrPageCount,
       ocrTextLayerCount,
       categories,
+      people,
     });
 
     // Plain "Summary.pdf" to sit alongside "D001 Letters.pdf" in the listing.

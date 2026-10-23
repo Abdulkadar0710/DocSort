@@ -1,7 +1,8 @@
 import type { ProposalDoc, ReviewFlag } from '@/lib/types';
+import { UNIDENTIFIED } from './people';
 
 /**
- * Group documents of the same category into one.
+ * Group documents into one per PERSON and category.
  *
  * Two receipts from different providers are, strictly, two documents — and the
  * brief's "each child PDF is one whole document" reads that way. This step is a
@@ -14,24 +15,27 @@ import type { ProposalDoc, ReviewFlag } from '@/lib/types';
  *   - each merged document records the original bundle pages it is built from,
  *     so provenance survives in the register, the summary and the child PDF's
  *     own metadata
- *   - anything that is not plainly the client's stays on its own
+ *   - documents about different people are never merged
  *
- * That last rule is the important one. Merging by category alone would fold a
- * different person's pathology result into the client's pathology file — the
- * exact mistake the whole relatedness check exists to prevent — so documents
- * that are not confidently the client's are never absorbed into a group.
+ * That last rule is the important one, and it is why the group key leads with
+ * the person. Grouping by category alone would fold a different person's
+ * pathology result into the client's pathology file — the exact mistake the
+ * relatedness check exists to prevent. Keying on person as well as category
+ * makes that structurally impossible rather than a rule to remember.
  */
 
-/** Documents in these states are never merged into a category group. */
+/** Documents in these states are never merged. */
 function mergeable(d: ProposalDoc): boolean {
   if (d.excluded) return false;
-  // Not confidently the client's: keep it visible and separate.
-  if (d.relates !== 'yes') return false;
-  // A suspected copy stays separate so the reviewer can compare it.
+  // A suspected copy stays separate so the reviewer can compare it against
+  // whatever it copies.
   if (d.dup_of) return false;
   if (d.review.some((f) => f.code === 'possible_copy' || f.code === 'multiple_patients')) {
     return false;
   }
+  // Nobody could be read from it: grouping these together would be asserting
+  // they share a person, which is exactly what we do not know.
+  if (!d.person_key || d.person_key === UNIDENTIFIED) return false;
   return !!d.doc_type;
 }
 
@@ -74,11 +78,15 @@ function mergeReview(docs: ProposalDoc[]): ReviewFlag[] {
 
 export interface GroupResult {
   docs: ProposalDoc[];
-  /** category -> how many separate documents went into it. */
-  merged: { category: string; from: number; pages: number }[];
+  /** One entry per group that actually absorbed more than one document. */
+  merged: { person: string; category: string; from: number; pages: number }[];
 }
 
-export function groupByCategory(input: ProposalDoc[]): GroupResult {
+export function groupByCategory(
+  input: ProposalDoc[],
+  /** person_key order from clustering: the client first, unidentified last. */
+  personOrder: string[] = [],
+): GroupResult {
   const groups = new Map<string, ProposalDoc[]>();
   const standalone: ProposalDoc[] = [];
 
@@ -87,7 +95,9 @@ export function groupByCategory(input: ProposalDoc[]): GroupResult {
       standalone.push(d);
       continue;
     }
-    const key = d.doc_type!;
+    // Person FIRST, then category. Two people's prescriptions can never land
+    // in the same group, whatever else they have in common.
+    const key = `${d.person_key}\u0000${d.doc_type}`;
     const list = groups.get(key);
     if (list) list.push(d);
     else groups.set(key, [d]);
@@ -96,25 +106,32 @@ export function groupByCategory(input: ProposalDoc[]): GroupResult {
   const merged: GroupResult['merged'] = [];
   const out: ProposalDoc[] = [...standalone];
 
-  for (const [category, docs] of groups) {
+  for (const [key, docs] of groups) {
     if (docs.length === 1) {
       out.push(docs[0]);
       continue;
     }
+    const category = key.split('\u0000')[1];
 
     const ordered = [...docs].sort((a, b) => Math.min(...a.pages) - Math.min(...b.pages));
     const pages = ordered.flatMap((d) => d.pages).sort((a, b) => a - b);
     const first = ordered[0];
     const span = dateSpan(ordered);
 
-    merged.push({ category, from: ordered.length, pages: pages.length });
+    merged.push({
+      person: first.person_name ?? 'unidentified',
+      category,
+      from: ordered.length,
+      pages: pages.length,
+    });
 
     out.push({
       ...first,
       id: `new:${category}`,
       pages,
       overview:
-        `${ordered.length} ${category.toLowerCase()} relating to the client` +
+        `${ordered.length} ${category.toLowerCase()} for ` +
+        `${first.person_name ?? 'an unidentified person'}` +
         (span ? `, dated ${span}` : '') +
         `. Original bundle pages ${pages.join(', ')}.`,
       title: `${ordered.length} ${category.toLowerCase()}${span ? `, ${span}` : ''}`,
@@ -125,15 +142,25 @@ export function groupByCategory(input: ProposalDoc[]): GroupResult {
       discipline: common(ordered.map((d) => d.discipline)),
       org: common(ordered.map((d) => d.org)),
       subcategory: common(ordered.map((d) => d.subcategory)),
-      relates: 'yes',
+      relates: first.relates,
       relates_reason: first.relates_reason,
       review: mergeReview(ordered),
       confidence: Math.min(...ordered.map((d) => d.confidence ?? 0)),
     });
   }
 
-  // Page order, then renumber so the register reads D001, D002, … top to bottom.
-  out.sort((a, b) => Math.min(...a.pages) - Math.min(...b.pages));
+  // Ordered by person, then by page within that person, so the register reads
+  // as whole people rather than interleaving three of them down the list. The
+  // preview stays in bundle page order regardless — that is the original, and
+  // it must not be reordered.
+  const rank = new Map(personOrder.map((k, i) => [k, i]));
+  out.sort((a, b) => {
+    const pa = rank.get(a.person_key ?? UNIDENTIFIED) ?? Number.MAX_SAFE_INTEGER;
+    const pb = rank.get(b.person_key ?? UNIDENTIFIED) ?? Number.MAX_SAFE_INTEGER;
+    if (pa !== pb) return pa - pb;
+    return Math.min(...a.pages) - Math.min(...b.pages);
+  });
+
   const renumbered = out.map((d, i) => ({
     ...d,
     doc_key: `D${String(i + 1).padStart(3, '0')}`,

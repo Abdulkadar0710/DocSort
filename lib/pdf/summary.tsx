@@ -8,6 +8,7 @@ import {
   renderToBuffer,
 } from '@react-pdf/renderer';
 import { REVIEW_LABELS, type Category, type ProposalDoc } from '@/lib/types';
+import { UNIDENTIFIED, type PersonGroup } from '@/lib/proposal/people';
 import { summariseRuns, type ValidationResult } from '@/lib/proposal/validate';
 
 /**
@@ -61,6 +62,8 @@ export interface SummaryInput {
   ocrTextLayerCount: number;
   /** The category set derived for this bundle. */
   categories: Category[];
+  /** Everyone the bundle turned out to be about. */
+  people: PersonGroup[];
 }
 
 const dash = (v: string | null | undefined) => (v && v !== 'unknown' ? v : '—');
@@ -171,6 +174,54 @@ function SummaryDoc(input: SummaryInput) {
 
         <Footer />
       </Page>
+
+      {/* --------------------------------------------------------- the people */}
+      {input.people.length > 1 && (
+        <Page size="A4" orientation="landscape" style={styles.page}>
+          <Text style={styles.h1}>People in this bundle</Text>
+          <Text style={styles.body}>
+            This bundle contains records for more than one person. They have
+            been kept completely separate: no document about one person has
+            been merged with another&apos;s, and each person&apos;s records are
+            exported into their own folder. Nothing has been discarded —
+            everything found is listed below and produced.
+          </Text>
+
+          <View style={styles.tHead}>
+            <Text style={[styles.th, { width: 160 }]}>Person</Text>
+            <Text style={[styles.th, { width: 70 }]}>Date of birth</Text>
+            <Text style={[styles.th, { width: 60 }]}>Documents</Text>
+            <Text style={[styles.th, { width: 50 }]}>Pages</Text>
+            <Text style={[styles.th, { flex: 1 }]}>Bundle pages</Text>
+          </View>
+
+          {input.people.map((p) => (
+            <View key={p.key} style={styles.tRow} wrap={false}>
+              <Text style={[styles.td, { width: 160 }, p.isClient ? {} : styles.warn]}>
+                {p.name}
+                {p.isClient ? ' — the client' : ''}
+              </Text>
+              <Text style={[styles.td, { width: 70 }]}>{dash(p.dob)}</Text>
+              <Text style={[styles.td, { width: 60 }]}>{p.docKeys.length}</Text>
+              <Text style={[styles.td, { width: 50 }]}>{p.pages.length}</Text>
+              <Text style={[styles.td, { flex: 1 }]}>{summariseRuns(p.pages)}</Text>
+            </View>
+          ))}
+
+          <Text style={styles.h3}>Why this matters</Text>
+          <Text style={styles.body}>
+            A bundle that should hold one person&apos;s records and turns out to
+            hold several is a disclosure problem as much as a filing one. The
+            pages belonging to anyone other than the client are listed above so
+            they can be dealt with deliberately rather than discovered later.
+            {input.people.some((p) => p.key === UNIDENTIFIED)
+              ? ' Pages naming nobody are grouped as an unidentified person rather than guessed at.'
+              : ''}
+          </Text>
+
+          <Footer />
+        </Page>
+      )}
 
       {/* ------------------------------------------------------- the taxonomy */}
       <Page size="A4" orientation="landscape" style={styles.page}>

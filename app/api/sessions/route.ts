@@ -51,7 +51,14 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  let body: { device_id?: string; name?: string };
+  let body: {
+    device_id?: string;
+    name?: string;
+    client_name?: string;
+    client_dob?: string;
+    client_ref?: string;
+    client_notes?: string;
+  };
   try {
     body = await req.json();
   } catch {
@@ -70,7 +77,17 @@ export async function POST(req: Request) {
   const sb = serverClient();
   const { data: session, error } = await sb
     .from('sessions')
-    .insert({ device_id, name, status: 'uploading' })
+    .insert({
+      device_id,
+      name,
+      status: 'uploading',
+      // Who the matter is about. Everything else found in the bundle is
+      // reported as another person rather than quietly discarded.
+      client_name: body.client_name?.trim() || null,
+      client_dob: body.client_dob?.trim() || null,
+      client_ref: body.client_ref?.trim() || null,
+      client_notes: body.client_notes?.trim() || null,
+    })
     .select('id, name, status, created_at')
     .single();
   if (error) {

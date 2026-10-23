@@ -495,8 +495,59 @@ function drawPage(
 
 const quote = (f: string) => (/[",\n]/.test(f) ? `"${f.replace(/"/g, '""')}"` : f);
 
+/**
+ * A second bundle for the multi-person case: 15 documents belonging to three
+ * different people, which is what the person-grouping step exists for.
+ *
+ * The three are chosen to defeat lazy matching: the partner shares the client's
+ * surname AND address, and the third person shares nothing but appears in the
+ * same employer's paperwork.
+ */
+const PETRAKIS = { name: 'JASON PETRAKIS', dob: '02/09/1979' };
+
+function forPerson(
+  src: Doc,
+  id: string,
+  patient: { name: string; dob: string },
+  relates: 'yes' | 'no',
+): Doc {
+  return {
+    ...src,
+    id,
+    patient: patient.name,
+    dob: patient.dob,
+    relates,
+    review: relates === 'no' ? 'Belongs to a different person' : undefined,
+  };
+}
+
+/** 15 documents: 5 for the client, 5 for the partner, 5 for a third person. */
+function multiPersonDocs(): Doc[] {
+  const pick = (ids: string[]) => ids.map((i) => DOCS.find((d) => d.id === i)!);
+  const clientSet = pick(['D008', 'D003', 'D009', 'D004', 'D001']);
+  const partnerSet = pick(['D007', 'D010', 'D002', 'D011', 'D005']);
+  const thirdSet = pick(['D006', 'D008', 'D001', 'D010', 'D007']);
+
+  const out: Doc[] = [];
+  let n = 1;
+  // Interleaved through the bundle, not neatly blocked, because that is how
+  // mixed-up paperwork actually arrives.
+  for (let i = 0; i < 5; i++) {
+    out.push(forPerson(clientSet[i], `D${String(n++).padStart(3, '0')}`, CLIENT, 'yes'));
+    out.push(forPerson(partnerSet[i], `D${String(n++).padStart(3, '0')}`, PARTNER, 'no'));
+    out.push(forPerson(thirdSet[i], `D${String(n++).padStart(3, '0')}`, PETRAKIS, 'no'));
+  }
+  return out;
+}
+
 async function main() {
-  const outName = process.argv[2] ?? 'testdata/dummy-12-mixed';
+  // argv[0] is the node binary and argv[1] this script, so only look past them.
+  const args = process.argv.slice(2);
+  const multi = args.includes('--multi');
+  const outName =
+    args.find((a) => !a.startsWith('--')) ??
+    (multi ? 'testdata/dummy-15-three-people' : 'testdata/dummy-12-mixed');
+  const docs = multi ? multiPersonDocs() : DOCS;
 
   const pdf = await PDFDocument.create();
   const fonts = {
@@ -505,17 +556,17 @@ async function main() {
     mono: await pdf.embedFont(StandardFonts.Courier),
   };
 
-  for (const doc of DOCS) {
+  for (const doc of docs) {
     drawPage(pdf.addPage(A4), doc, fonts);
   }
-  pdf.setTitle('Test bundle — mixed records');
+  pdf.setTitle(multi ? 'Test bundle — three people' : 'Test bundle — mixed records');
   await writeFile(`${outName}.pdf`, await pdf.save());
 
   const header = [
     'id', 'pages', 'n', 'type', 'desc', 'date', 'author',
     'discipline', 'org', 'relates', 'dup', 'review', 'note', 'fmt',
   ];
-  const rows = DOCS.map((d, i) => [
+  const rows = docs.map((d, i) => [
     d.id,
     String(i + 1),
     '1',
@@ -536,17 +587,30 @@ async function main() {
     [header, ...rows].map((r) => r.map(quote).join(',')).join('\n') + '\n',
   );
 
-  const byType = new Map<string, number>();
-  for (const d of DOCS) byType.set(d.type, (byType.get(d.type) ?? 0) + 1);
-
-  console.log(`\n${outName}.pdf  —  ${DOCS.length} pages, ${DOCS.length} documents`);
+  console.log(`\n${outName}.pdf  —  ${docs.length} pages, ${docs.length} documents`);
   console.log(`${outName}_answer_key.csv  —  answer key\n`);
+
+  if (multi) {
+    const byPerson = new Map<string, number>();
+    for (const d of docs) byPerson.set(d.patient, (byPerson.get(d.patient) ?? 0) + 1);
+    console.log('Expected people:');
+    for (const [who, n] of byPerson) {
+      console.log(`  ${String(n).padStart(2)}  ${who}${who === CLIENT.name ? '  (the client)' : ''}`);
+    }
+    console.log('\nInterleaved through the bundle, not blocked by person.');
+    console.log(`${PARTNER.name} shares the client's surname and address;`);
+    console.log(`${PETRAKIS.name} shares the employer. Only name and DOB separate them.\n`);
+    return;
+  }
+
+  const byType = new Map<string, number>();
+  for (const d of docs) byType.set(d.type, (byType.get(d.type) ?? 0) + 1);
   console.log('Expected grouping:');
   for (const [t, n] of [...byType.entries()].sort((a, b) => b[1] - a[1])) {
     console.log(`  ${String(n).padStart(2)}  ${t}`);
   }
   console.log(
-    `\nEvery document is about ${CLIENT.name} except ${DOCS.find((d) => d.relates === 'no')!.id},`,
+    `\nEvery document is about ${CLIENT.name} except ${docs.find((d) => d.relates === 'no')!.id},`,
   );
   console.log(`which belongs to ${PARTNER.name} — same surname, same address, same lab,`);
   console.log('same collection date. Only the name and date of birth differ.\n');

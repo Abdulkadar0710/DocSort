@@ -4,8 +4,18 @@ import { colorFor } from '@/lib/palette';
 import { summariseRuns } from '@/lib/proposal/validate';
 import { REVIEW_LABELS, SERIOUS_REVIEW_CODES, type ProposalDoc } from '@/lib/types';
 
+export interface PersonSummary {
+  key: string;
+  name: string;
+  dob: string | null;
+  isClient: boolean;
+  docKeys: string[];
+  pages: number[];
+}
+
 interface Props {
   docs: ProposalDoc[];
+  people?: PersonSummary[];
   activePage: number | null;
   onJump: (page: number) => void;
 }
@@ -18,7 +28,7 @@ interface Props {
  * in the summary PDF; crowding it in here makes the list harder to scan, and
  * scanning is what it is for.
  */
-export function DocumentSidebar({ docs, activePage, onJump }: Props) {
+export function DocumentSidebar({ docs, people = [], activePage, onJump }: Props) {
   const real = docs.filter((d) => !d.excluded).length;
   const identified = docs.filter((d) => !d.excluded && d.doc_type).length;
 
@@ -39,14 +49,58 @@ export function DocumentSidebar({ docs, activePage, onJump }: Props) {
       </div>
 
       <ul className="min-h-0 flex-1 overflow-y-auto">
+        {/* A person header is shown only when the bundle holds more than one.
+            With a single person it would be noise; with several it is the most
+            important thing on the screen, because records belonging to someone
+            else are a disclosure problem, not just a filing one. */}
         {docs.map((d, i) => {
+          const personKey = d.person_key ?? null;
+          const prevKey = i > 0 ? (docs[i - 1].person_key ?? null) : undefined;
+          const startsPerson = people.length > 1 && personKey !== prevKey;
+          const person = startsPerson
+            ? people.find((p) => p.key === personKey)
+            : undefined;
           const color = colorFor(i, d.excluded);
           const isActive = activePage !== null && d.pages.includes(activePage);
           const serious = d.review.filter((f) => SERIOUS_REVIEW_CODES.includes(f.code));
-          const needsReview = serious.length > 0 || d.relates === 'no';
+          // With a person header above, repeating "another person" on every
+          // row underneath it is noise.
+          const needsReview = serious.length > 0 || (people.length <= 1 && d.relates === 'no');
 
           return (
             <li key={d.doc_key}>
+              {startsPerson && (
+                <div
+                  className={`flex items-baseline gap-1.5 border-y px-3 py-1.5 ${
+                    person?.isClient
+                      ? 'border-slate-200 bg-slate-100 dark:border-slate-700 dark:bg-slate-800'
+                      : 'border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/50'
+                  }`}
+                >
+                  <span
+                    className={`truncate text-[11px] font-semibold ${
+                      person?.isClient
+                        ? 'text-slate-900 dark:text-slate-100'
+                        : 'text-amber-900 dark:text-amber-300'
+                    }`}
+                  >
+                    {person?.name ?? 'Unidentified person'}
+                  </span>
+                  {person?.isClient ? (
+                    <span className="shrink-0 text-[9px] font-medium text-slate-500">
+                      the client
+                    </span>
+                  ) : (
+                    <span className="shrink-0 text-[9px] font-medium text-amber-700 dark:text-amber-400">
+                      not the client
+                    </span>
+                  )}
+                  <span className="ml-auto shrink-0 text-[9px] text-slate-500">
+                    {person?.pages.length ?? 0}p
+                  </span>
+                </div>
+              )}
+
               <button
                 type="button"
                 onClick={() => onJump(d.pages[0])}

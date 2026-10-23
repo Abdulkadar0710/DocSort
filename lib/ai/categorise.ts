@@ -1,6 +1,6 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { claude, MODEL_BULK, readUsage, toolResult, type Usage } from './claude';
-import { categoriseSystem } from './prompts';
+import { categoriseSystem, type ClientBrief } from './prompts';
 import { normaliseName } from './taxonomy';
 import {
   cleanReview,
@@ -60,6 +60,16 @@ const CATEGORISE_TOOL: Anthropic.Tool = {
       author: { type: 'string' },
       discipline: { type: 'string' },
       org: { type: 'string' },
+      person_name: {
+        type: 'string',
+        description:
+          'The patient, worker or subject this record is ABOUT, as printed. '
+          + 'Not the author or signatory. "unknown" if nobody is named.',
+      },
+      person_dob: {
+        type: 'string',
+        description: 'That person\'s date of birth as printed, DD/MM/YYYY, or "unknown".',
+      },
       relates: { type: 'string', enum: ['yes', 'no', 'uncertain', 'n/a'] },
       relates_reason: {
         type: 'string',
@@ -97,6 +107,8 @@ interface RawCategorise {
   author?: string;
   discipline?: string;
   org?: string;
+  person_name?: string;
+  person_dob?: string;
   relates?: Relates;
   relates_reason?: string;
   review?: ReviewFlag[];
@@ -119,8 +131,10 @@ export async function categoriseDocument(opts: {
   /** Text layer per page where the original had one. */
   textByPage: Map<number, string>;
   docKey: string;
+  client: ClientBrief;
 }): Promise<CategoriseResult> {
-  const { pdfBase64, pageNumbers, rotationsCleared, categories, textByPage, docKey } = opts;
+  const { pdfBase64, pageNumbers, rotationsCleared, categories, textByPage, docKey, client } =
+    opts;
 
   const textBlock = pageNumbers
     .map((p) => {
@@ -155,7 +169,7 @@ export async function categoriseDocument(opts: {
     system: [
       {
         type: 'text',
-        text: categoriseSystem(categories),
+        text: categoriseSystem(categories, client),
         // The brief and the whole taxonomy are identical for every document in
         // the bundle, so they are cached once and read back on each of the
         // ~130 calls instead of being re-billed each time. This is the single
@@ -243,6 +257,12 @@ export async function categoriseDocument(opts: {
       org: orNull(raw.org),
       relates,
       relates_reason: orNull(raw.relates_reason),
+      person_name: orNull(raw.person_name),
+      person_dob: orNull(raw.person_dob),
+      // Assigned by clustering once every document has been read, so that
+      // spelling variants of one person collapse rather than each becoming
+      // their own group.
+      person_key: null,
       review,
       confidence: Math.max(0, Math.min(1, Number(raw.confidence) || 0)),
     },

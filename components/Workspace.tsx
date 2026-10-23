@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { BundleViewer, type ViewerPage } from '@/components/BundleViewer';
-import { DocumentSidebar } from '@/components/DocumentSidebar';
+import { DocumentSidebar, type PersonSummary } from '@/components/DocumentSidebar';
 import { FeedbackPanel } from '@/components/FeedbackPanel';
 import { SessionsRail } from '@/components/SessionsRail';
 import type { Proposal } from '@/lib/types';
@@ -37,6 +37,7 @@ interface SessionPayload {
     created_at: string;
   }[];
   outputs: { id: string; kind: string; filename: string; page_count: number | null }[];
+  people: PersonSummary[];
   progress: { total: number; done: number; failed: number; pending: number };
   ocr: { scannedTotal: number; done: number; needsOcr: number[] };
   validation: ValidationResult | null;
@@ -226,6 +227,7 @@ export function Workspace({ sessionId: id }: { sessionId: string }) {
   }
 
   const { session, bundleUrl, proposal, pages, validation, progress } = data;
+  const people = data.people ?? [];
   const processing = progress.pending > 0;
   const approved = session.status === 'approved';
 
@@ -256,6 +258,17 @@ export function Workspace({ sessionId: id }: { sessionId: string }) {
               className="hidden shrink-0 whitespace-nowrap text-xs text-slate-400 xl:inline"
             >
               scans {ocrProgress.done}/{ocrProgress.total}
+            </span>
+          )}
+
+          {people.length > 1 && (
+            <span
+              title={people
+                .map((p) => `${p.name}${p.isClient ? ' (the client)' : ''} — ${p.pages.length} pages`)
+                .join('\n')}
+              className="shrink-0 whitespace-nowrap rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-900 dark:bg-amber-950 dark:text-amber-300"
+            >
+              {people.length} people in this bundle
             </span>
           )}
 
@@ -292,6 +305,7 @@ export function Workspace({ sessionId: id }: { sessionId: string }) {
 
         <DocumentSidebar
           docs={proposal?.docs ?? []}
+          people={people}
           activePage={activePage}
           onJump={jump}
         />

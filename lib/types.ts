@@ -105,6 +105,11 @@ export interface DocMeta {
   relates: Relates;
   /** Must name the identifiers compared, not just assert a conclusion. */
   relates_reason: string | null;
+  /** Who the document is about, as printed. */
+  person_name: string | null;
+  person_dob: string | null;
+  /** Normalised identity used to group by person; set by clustering. */
+  person_key: string | null;
   /** doc_key of the document this duplicates. */
   dup_of: string | null;
   review: ReviewFlag[];

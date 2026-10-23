@@ -7,6 +7,7 @@
  * client's partner.
  */
 import { groupByCategory } from '../lib/proposal/group';
+import { clusterPeople } from '../lib/proposal/people';
 import { validateProposal } from '../lib/proposal/validate';
 import type { ProposalDoc } from '../lib/types';
 
@@ -40,6 +41,9 @@ function doc(
     org: null,
     relates: 'yes',
     relates_reason: null,
+    person_name: 'Daniel James Marsh',
+    person_dob: '14/03/1984',
+    person_key: 'daniel-james-marsh-19840314',
     dup_of: null,
     review: [],
     confidence: 0.9,
@@ -66,10 +70,20 @@ const bundle: ProposalDoc[] = [
     org: 'Carrick Park Pathology',
     relates: 'no',
     relates_reason: 'Patient is Kylie Anne Marsh, DOB 21/06/1986',
+    person_name: 'Kylie Anne Marsh',
+    person_dob: '21/06/1986',
+    person_key: 'kylie-anne-marsh-19860621',
   }),
 ];
 
-const { docs, merged } = groupByCategory(bundle);
+const clustered = clusterPeople(bundle.map((d) => ({ ...d })), {
+  name: 'Daniel James Marsh',
+  dob: '14/03/1984',
+});
+const { docs, merged } = groupByCategory(
+  clustered.docs,
+  clustered.people.map((p) => p.key),
+);
 const byKey = (k: string) => docs.find((d) => d.doc_key === k)!;
 const holding = (page: number) => docs.find((d) => d.pages.includes(page))!;
 
@@ -112,6 +126,35 @@ check('date becomes a span', byKey('D001').doc_date === '12/03/2024 - 18/03/2024
 check('differing organisations collapse to none', byKey('D001').org === null);
 check('shared subtype is kept where all agree', holding(8).subcategory === null);
 check('provenance recorded in the overview', (holding(3).overview ?? '').includes('3, 4, 5, 6'));
+
+// ---------------------------------------------------------------------------
+// PERSON FIRST: two people with prescriptions must never share a group, even
+// though the category is identical.
+{
+  const two = [
+    doc('A1', 1, 'Prescriptions', { person_name: 'Daniel James Marsh', person_dob: '14/03/1984', person_key: null }),
+    doc('A2', 2, 'Prescriptions', { person_name: 'Daniel Marsh', person_dob: null, person_key: null }),
+    doc('A3', 3, 'Prescriptions', { person_name: 'Jason Petrakis', person_dob: '02/09/1979', person_key: null }),
+    doc('A4', 4, 'Prescriptions', { person_name: 'Jason Petrakis', person_dob: null, person_key: null }),
+  ];
+  const c = clusterPeople(two.map((d) => ({ ...d })), { name: 'Daniel James Marsh', dob: '14/03/1984' });
+  const { docs: g } = groupByCategory(c.docs, c.people.map((p) => p.key));
+  check('two people with the same category stay apart', g.length === 2, String(g.length));
+  check('the client group holds pages 1-2', g[0].pages.join() === '1,2', g[0].pages.join());
+  check('the other person holds pages 3-4', g[1].pages.join() === '3,4', g[1].pages.join());
+  check('client group is listed first', g[0].relates === 'yes');
+}
+
+// Documents naming nobody are never swept together.
+{
+  const anon = [
+    doc('B1', 1, 'Notes', { person_name: null, person_key: null }),
+    doc('B2', 2, 'Notes', { person_name: null, person_key: null }),
+  ];
+  const c = clusterPeople(anon.map((d) => ({ ...d })));
+  const { docs: g } = groupByCategory(c.docs, c.people.map((p) => p.key));
+  check('unidentified documents stay separate', g.length === 2, String(g.length));
+}
 
 // A single document in its own category is left exactly as it was.
 {

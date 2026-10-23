@@ -10,6 +10,7 @@ import { fetchBundle, sliceForModel, slicePagesForModel } from '@/lib/pdf/slice'
 import { isAuthoritative, planWindows } from '@/lib/ai/windows';
 import { loadProposal, saveRevision } from '@/lib/proposal/store';
 import { groupByCategory } from '@/lib/proposal/group';
+import { clusterPeople } from '@/lib/proposal/people';
 import { summariseRuns } from '@/lib/proposal/validate';
 import type { PageSignals } from '@/lib/types';
 
@@ -69,7 +70,7 @@ export async function POST(req: Request) {
 
   const { data: session } = await sb
     .from('sessions')
-    .select('id, bundle_path, page_count, status')
+    .select('id, bundle_path, page_count, status, client_name, client_dob, client_ref, client_notes')
     .eq('id', sessionId)
     .single();
   if (!session?.bundle_path || !session.page_count) {
@@ -127,9 +128,17 @@ export async function POST(req: Request) {
       } else if (claimed.kind === 'taxonomy') {
         await runTaxonomy(sb, sessionId, claimed.id);
       } else if (claimed.kind === 'group') {
-        await runGrouping(sb, sessionId, session.page_count, claimed.id);
+        await runGrouping(sb, sessionId, session.page_count, claimed.id, {
+          name: session.client_name,
+          dob: session.client_dob,
+        });
       } else {
-        await runCategorise(sb, sessionId, session.bundle_path, claimed);
+        await runCategorise(sb, sessionId, session.bundle_path, claimed, {
+          name: session.client_name,
+          dob: session.client_dob,
+          ref: session.client_ref,
+          notes: session.client_notes,
+        });
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -285,6 +294,7 @@ async function runCategorise(
   sessionId: string,
   bundlePath: string,
   job: { id: string; proposal_id: string | null; doc_key: string | null },
+  client: { name: string | null; dob: string | null; ref: string | null; notes: string | null },
 ) {
   if (!job.proposal_id || !job.doc_key) throw new Error('categorise job is missing its target');
 
@@ -325,6 +335,7 @@ async function runCategorise(
     categories,
     textByPage,
     docKey: job.doc_key,
+    client,
   });
 
   // A genuinely new category joins the taxonomy so later documents can use it
@@ -371,10 +382,36 @@ async function runGrouping(
   sessionId: string,
   pageCount: number,
   jobId: string,
+  client: { name: string | null; dob: string | null },
 ) {
   const current = await loadProposal(sb, sessionId);
   if (!current) throw new Error('no proposal to group');
-  const { docs, merged } = groupByCategory(current.docs);
+
+  // Work out who the bundle is about BEFORE grouping anything. Spelling
+  // variants of one person collapse here, so "D. Marsh" and "Daniel James
+  // Marsh" become one group rather than two, and a differing date of birth
+  // always splits — which is what keeps a relative with the same surname from
+  // being absorbed into the client.
+  const clustered = clusterPeople(
+    current.docs.map((d) => ({ ...d })),
+    client,
+  );
+
+  const withPeople = clustered.docs.map((d) => ({
+    ...d,
+    // Whether this person is the client is now a property of the person, not a
+    // judgement made separately on each document.
+    relates: d.excluded
+      ? ('n/a' as const)
+      : clustered.people.find((p) => p.key === d.person_key)?.isClient
+        ? ('yes' as const)
+        : d.relates,
+  }));
+
+  const { docs, merged } = groupByCategory(
+    withPeople,
+    clustered.people.map((p) => p.key),
+  );
 
   // Idempotent by construction: once grouped, every category holds a single
   // document, so a repeat run finds nothing to merge and changes nothing.
@@ -383,13 +420,22 @@ async function runGrouping(
     return;
   }
 
+  const peopleFound = clustered.people.filter((p) => p.docKeys.length > 0);
   const detail = merged
-    .map((m) => `${m.from} ${m.category.toLowerCase()} into one (${m.pages} pages)`)
+    .map((m) => `${m.from} ${m.category.toLowerCase()} for ${m.person} (${m.pages} pages)`)
     .join('; ');
+
+  const peopleLine =
+    peopleFound.length > 1
+      ? `Found records for ${peopleFound.length} people: ` +
+        peopleFound
+          .map((p) => `${p.name}${p.isClient ? ' (the client)' : ''} — ${p.pages.length} pages`)
+          .join('; ') + '. '
+      : '';
 
   const saved = await saveRevision(sb, sessionId, docs, {
     origin: 'ai',
-    summary: `Gathered same-category documents: ${detail}.`,
+    summary: `${peopleLine}Gathered same-category documents: ${detail}.`,
     pageCount,
     parentRevision: current.revision,
   });
@@ -399,10 +445,19 @@ async function runGrouping(
     session_id: sessionId,
     role: 'ai',
     content:
+      (peopleFound.length > 1
+        ? `This bundle contains records for ${peopleFound.length} different people: ` +
+          peopleFound
+            .map(
+              (p) =>
+                `${p.name}${p.isClient ? ' (the client)' : ''} on ${p.pages.length} page(s)`,
+            )
+            .join(', ') +
+          `. I have kept them completely separate. `
+        : '') +
       `I gathered documents of the same kind together — ${detail}. ` +
-      `${kept} document(s) were left on their own, including anything that ` +
-      `may not be about the client. Tell me if you would rather any of them ` +
-      `stayed separate.`,
+      `${kept} document(s) were left on their own. ` +
+      `Tell me if you would rather any of them stayed separate.`,
     proposal_revision: saved.revision,
   });
 

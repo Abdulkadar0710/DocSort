@@ -1,17 +1,52 @@
 import type { Category } from '@/lib/types';
 
+export interface ClientBrief {
+  name: string | null;
+  dob: string | null;
+  ref: string | null;
+  notes: string | null;
+}
+
 /**
- * The client brief for the matter under assessment.
+ * Describe the person the matter is about.
  *
- * This is what makes "does this document actually relate to the client?"
- * answerable. The DEV bundle deliberately contains a partner's pathology
- * results, a payslip for a different employee, and a GP referral for a
- * different Daniel Marsh with a different date of birth — none of which can be
- * spotted without knowing who the client actually is.
+ * This is what makes "who is this document about, and is it the client?"
+ * answerable. A bundle routinely contains a partner's pathology results, a
+ * different employee's payslip, or another patient with the same surname —
+ * none of which can be spotted without knowing who the client actually is.
  *
- * Hardcoded for the prototype. In a real deployment this would be a per-session
- * field captured at upload, since every matter has its own brief.
+ * Captured per session at upload. When nothing is given the model is told so
+ * explicitly, and reports who each document is about without ruling on whether
+ * that person is the client — which is honest, rather than measuring every
+ * document against somebody who is not in the bundle.
  */
+export function clientBriefText(client: ClientBrief): string {
+  const named = (client.name ?? '').trim();
+  if (!named) {
+    return [
+      'No client has been named for this matter.',
+      '',
+      'Report who each document is about, exactly as printed. Set relates to',
+      '"uncertain" rather than guessing whether that person is the client —',
+      'there is nothing here to compare them against.',
+    ].join('\n');
+  }
+
+  return [
+    `Client:         ${named}`,
+    client.dob ? `Date of birth:  ${client.dob}` : null,
+    client.ref ? `Claim number:   ${client.ref}` : null,
+    '',
+    client.notes ? `${client.notes}\n` : null,
+    'Anyone else appearing in this bundle — a relative, another claimant, a',
+    'different patient with the same surname — is NOT the client, however much',
+    'else they share. Compare the identifiers actually printed on the document.',
+  ]
+    .filter((l) => l !== null)
+    .join('\n');
+}
+
+/** Fallback brief, used by tooling and tests. */
 export const CLIENT_BRIEF = `
 Client:         Daniel James Marsh
 Date of birth:  14/03/1984
@@ -154,7 +189,10 @@ export function renderCategories(categories: Category[]): string {
  * a twelve-page record. Non-contiguous documents arrive here as just their own
  * pages, with any intruding page left out.
  */
-export function categoriseSystem(categories: Category[]): string {
+export function categoriseSystem(
+  categories: Category[],
+  client: ClientBrief = { name: null, dob: null, ref: null, notes: null },
+): string {
   return `
 You categorise ONE document from a medico-legal bundle. Read its text and fill
 every field.
@@ -163,7 +201,7 @@ RULE: Never guess. If a value is not written in the document, use "unknown".
 
 ## The client being assessed
 
-${CLIENT_BRIEF}
+${clientBriefText(client)}
 
 ## STEPS
 
@@ -177,7 +215,12 @@ ${CLIENT_BRIEF}
    Running records spanning time → "DD/MM/YYYY - DD/MM/YYYY".
 6. author (who wrote or signed it), discipline (their profession),
    org (issuing organisation).
-7. relates — compare the people named in the document with the CLIENT BRIEF:
+7. person_name / person_dob — WHO THE DOCUMENT IS ABOUT: the patient, worker
+   or subject whose record this is, exactly as printed, with their date of
+   birth if stated. Not the author, not the signatory, not a witness — the
+   person the record concerns. If the document names nobody, use "unknown";
+   never infer a person from context.
+8. relates — compare that person with the CLIENT BRIEF:
      yes       = about the client (older records still count)
      no        = a different person, even with the same surname, address or
                  employer
@@ -185,13 +228,13 @@ ${CLIENT_BRIEF}
    Give relates_reason naming the identifiers you actually compared
    (for example "name and DOB match", or "surname matches but first name is
    Kylie and no DOB given").
-8. review: flags a human must check, each {code, message} with a one-line
+9. review: flags a human must check, each {code, message} with a one-line
    message. code is one of:
      missing_pages, incomplete, illegible, rotated, no_author, no_date,
      relates_uncertain, multiple_patients, possible_copy, low_confidence
    Use possible_copy when the document looks like a file copy, fax copy or
    re-scan of something else — stamps, fax headers, "copy" markings.
-9. confidence: 0 to 1.
+10. confidence: 0 to 1.
 
 ## NOTES
 

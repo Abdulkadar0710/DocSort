@@ -210,6 +210,10 @@ export function stitch(signals: PageSignals[]): StitchResult {
       org: blank ? null : head.org,
       relates: blank ? 'n/a' : 'unknown',
       relates_reason: null,
+      // Filled in by the categorise pass, which reads the whole document.
+      person_name: blank ? null : (head.patient_name_seen?.split(/[,;]/)[0]?.trim() ?? null),
+      person_dob: null,
+      person_key: null,
       dup_of: null,
       review,
       confidence: Math.min(...ss.map((s) => s.confidence)),

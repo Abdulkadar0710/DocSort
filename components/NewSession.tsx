@@ -20,6 +20,12 @@ export function NewSession() {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const [phase, setPhase] = useState<Phase>('idle');
+  // Who the matter is about. Everything else found in the bundle is reported as
+  // another person rather than quietly discarded — which is only answerable if
+  // we know who the client is, so this is asked up front rather than compiled in.
+  const [clientName, setClientName] = useState('Daniel James Marsh');
+  const [clientDob, setClientDob] = useState('14/03/1984');
+  const [clientRef, setClientRef] = useState('UI-22-0815-4471');
   const [detail, setDetail] = useState('');
   const [pct, setPct] = useState(0);
 
@@ -37,6 +43,9 @@ export function NewSession() {
         body: JSON.stringify({
           device_id: deviceId(),
           name: file.name.replace(/\.pdf$/i, ''),
+          client_name: clientName,
+          client_dob: clientDob,
+          client_ref: clientRef,
         }),
       });
       if (!res.ok) throw new Error((await res.json()).error ?? 'could not start a session');
@@ -103,6 +112,39 @@ export function NewSession() {
           Upload one bundle PDF. Nothing is split until you review the proposed
           documents and approve them.
         </p>
+
+        <div className="mx-auto mt-5 max-w-md text-left">
+          <p className="mb-2 text-xs font-medium text-slate-700 dark:text-slate-300">
+            Who is this matter about?
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              value={clientName}
+              onChange={(e) => setClientName(e.target.value)}
+              disabled={busy}
+              placeholder="Full name"
+              className="col-span-2 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-900 focus:outline-none disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+            />
+            <input
+              value={clientDob}
+              onChange={(e) => setClientDob(e.target.value)}
+              disabled={busy}
+              placeholder="Date of birth (DD/MM/YYYY)"
+              className="rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-900 focus:outline-none disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+            />
+            <input
+              value={clientRef}
+              onChange={(e) => setClientRef(e.target.value)}
+              disabled={busy}
+              placeholder="Claim or file number"
+              className="rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-900 focus:outline-none disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+            />
+          </div>
+          <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+            Anything in the bundle about somebody else is kept separate and
+            flagged, never discarded. Leave blank if you do not know yet.
+          </p>
+        </div>
 
         <button
           type="button"

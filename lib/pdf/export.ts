@@ -16,7 +16,10 @@ import type { OcrWord, ProposalDoc } from '@/lib/types';
 
 export interface ChildPdf {
   doc_key: string;
+  /** Path inside the archive, e.g. "Daniel-James-Marsh/D001 Invoices.pdf". */
   filename: string;
+  /** Folder component only, for grouping in the UI. */
+  folder: string | null;
   bytes: Uint8Array;
   pageCount: number;
 }
@@ -113,6 +116,10 @@ export async function buildChildPdfs(
   ocrByPage: Map<number, OcrWord[]>,
   /** category name -> its short plural label, from the derived taxonomy. */
   shortLabels: Map<string, string> = new Map(),
+  /** person_key -> folder name. When more than one person appears in a bundle,
+   *  their documents are filed in separate folders so a reviewer can hand over
+   *  one person's records without sweeping up somebody else's. */
+  personFolders: Map<string, string> = new Map(),
 ): Promise<ChildPdf[]> {
   const labelFor = (name: string | null) => (name ? shortLabels.get(name) ?? null : null);
   const src = await PDFDocument.load(bundleBytes, { ignoreEncryption: true });
@@ -136,6 +143,7 @@ export async function buildChildPdfs(
         doc.doc_date && `Date: ${doc.doc_date}`,
         doc.author && `Author: ${doc.author}`,
         doc.org && `Organisation: ${doc.org}`,
+        doc.person_name && `About: ${doc.person_name}`,
         // Provenance is the point of the whole exercise: record it in the file.
         `Original bundle pages: ${doc.pages.join(', ')}`,
       ]
@@ -158,9 +166,13 @@ export async function buildChildPdfs(
       if (words?.length) await addInvisibleText(out, i, words);
     }
 
+    const folder = doc.person_key ? (personFolders.get(doc.person_key) ?? null) : null;
+    const name = childFilename(doc, labelFor);
+
     children.push({
       doc_key: doc.doc_key,
-      filename: childFilename(doc, labelFor),
+      filename: folder ? `${folder}/${name}` : name,
+      folder,
       bytes: await out.save(),
       pageCount: indices.length,
     });
