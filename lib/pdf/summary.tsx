@@ -1,0 +1,351 @@
+import React from 'react';
+import {
+  Document,
+  Page,
+  Text,
+  View,
+  StyleSheet,
+  renderToBuffer,
+} from '@react-pdf/renderer';
+import type { ProposalDoc } from '@/lib/types';
+import { summariseRuns, type ValidationResult } from '@/lib/proposal/validate';
+
+/**
+ * The summary PDF.
+ *
+ * The brief asks for two things here, and both matter: an account of how the
+ * bundle was split and what was identified about each child PDF, AND the design
+ * choices behind the solution. The second half is written out in full below
+ * rather than left implicit.
+ */
+
+const styles = StyleSheet.create({
+  page: { paddingTop: 34, paddingBottom: 40, paddingHorizontal: 28, fontSize: 7.5, color: '#0f172a' },
+  h1: { fontSize: 15, fontFamily: 'Helvetica-Bold', marginBottom: 3 },
+  h2: { fontSize: 10, fontFamily: 'Helvetica-Bold', marginTop: 14, marginBottom: 5 },
+  h3: { fontSize: 8.5, fontFamily: 'Helvetica-Bold', marginTop: 9, marginBottom: 3 },
+  sub: { fontSize: 8, color: '#475569', marginBottom: 2 },
+  body: { fontSize: 8, lineHeight: 1.5, color: '#1e293b', marginBottom: 5 },
+
+  statRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8, marginBottom: 2 },
+  stat: { borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 3, paddingVertical: 4, paddingHorizontal: 7, minWidth: 84 },
+  statN: { fontSize: 13, fontFamily: 'Helvetica-Bold' },
+  statL: { fontSize: 6.5, color: '#475569', marginTop: 1 },
+
+  tHead: { flexDirection: 'row', borderBottomWidth: 1, borderColor: '#0f172a', paddingBottom: 3, marginTop: 4 },
+  tRow: { flexDirection: 'row', borderBottomWidth: 0.5, borderColor: '#e2e8f0', paddingVertical: 3 },
+  th: { fontFamily: 'Helvetica-Bold', fontSize: 6.5 },
+  td: { fontSize: 6.8, paddingRight: 3 },
+
+  cId: { width: 30 }, cPg: { width: 44 }, cTy: { width: 78 }, cDesc: { width: 150 },
+  cDt: { width: 46 }, cAu: { width: 78 }, cOrg: { width: 78 }, cCl: { width: 34 },
+  cDup: { width: 30 }, cFlag: { flex: 1 },
+
+  muted: { color: '#64748b' },
+  warn: { color: '#b45309' },
+  bad: { color: '#b91c1c' },
+  footer: { position: 'absolute', bottom: 18, left: 28, right: 28, flexDirection: 'row', justifyContent: 'space-between', fontSize: 6.5, color: '#94a3b8' },
+});
+
+export interface SummaryInput {
+  sessionName: string;
+  pageCount: number;
+  docs: ProposalDoc[];
+  validation: ValidationResult;
+  revisions: number;
+  feedbackRounds: number;
+  approvedAt: Date;
+  /** Pages the original carried no text layer for — scans, faxes, handwriting. */
+  ocrPageCount: number;
+  /** Of those, how many got an invisible text layer from the browser OCR pass. */
+  ocrTextLayerCount: number;
+}
+
+const dash = (v: string | null | undefined) => (v && v !== 'unknown' ? v : '—');
+
+function Stat({ n, label }: { n: number | string; label: string }) {
+  return (
+    <View style={styles.stat}>
+      <Text style={styles.statN}>{String(n)}</Text>
+      <Text style={styles.statL}>{label}</Text>
+    </View>
+  );
+}
+
+function Footer() {
+  return (
+    <View style={styles.footer} fixed>
+      <Text>Unbundle — medico-legal document preparation</Text>
+      <Text render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} />
+    </View>
+  );
+}
+
+function SummaryDoc(input: SummaryInput) {
+  const { docs, pageCount, validation } = input;
+  const real = docs.filter((d) => !d.excluded);
+  const excluded = docs.filter((d) => d.excluded);
+  const dups = real.filter((d) => d.dup_of);
+  const otherPerson = real.filter((d) => d.relates === 'no');
+  const uncertain = real.filter((d) => d.relates === 'uncertain');
+  const flagged = real.filter((d) => d.review_flags.length > 0);
+  const nonContiguous = real.filter(
+    (d) => d.pages.length > 1 && d.pages[d.pages.length - 1] - d.pages[0] + 1 !== d.pages.length,
+  );
+
+  return (
+    <Document title={`Unbundle summary — ${input.sessionName}`}>
+      {/* ------------------------------------------------ overview + register */}
+      <Page size="A4" orientation="landscape" style={styles.page}>
+        <Text style={styles.h1}>Document register</Text>
+        <Text style={styles.sub}>
+          {input.sessionName} · {pageCount} pages · split approved{' '}
+          {input.approvedAt.toLocaleString('en-AU')}
+        </Text>
+
+        <View style={styles.statRow}>
+          <Stat n={real.length} label="Documents identified" />
+          <Stat n={excluded.length} label="Pages excluded" />
+          <Stat n={pageCount} label="Pages in bundle" />
+          <Stat n={dups.length} label="Duplicates flagged" />
+          <Stat n={otherPerson.length + uncertain.length} label="Not/maybe the client" />
+          <Stat n={flagged.length} label="Flagged for review" />
+          <Stat n={input.ocrPageCount} label="Scanned (no text layer)" />
+          <Stat n={input.ocrTextLayerCount} label="Given a text layer" />
+          <Stat n={input.feedbackRounds} label="Reviewer revisions" />
+        </View>
+
+        <Text style={[styles.body, validation.ok ? styles.muted : styles.bad]}>
+          {validation.ok
+            ? `Page accounting checks out: all ${pageCount} pages of the original appear in exactly one child PDF, or are listed as excluded below. No page is in two documents and none is missing.`
+            : `PAGE ACCOUNTING PROBLEM: ${validation.errors.join('; ')}`}
+        </Text>
+
+        <View style={styles.tHead}>
+          <Text style={[styles.th, styles.cId]}>ID</Text>
+          <Text style={[styles.th, styles.cPg]}>Bundle pages</Text>
+          <Text style={[styles.th, styles.cTy]}>Type</Text>
+          <Text style={[styles.th, styles.cDesc]}>Description</Text>
+          <Text style={[styles.th, styles.cDt]}>Date</Text>
+          <Text style={[styles.th, styles.cAu]}>Author / discipline</Text>
+          <Text style={[styles.th, styles.cOrg]}>Organisation</Text>
+          <Text style={[styles.th, styles.cCl]}>Client?</Text>
+          <Text style={[styles.th, styles.cDup]}>Dup of</Text>
+          <Text style={[styles.th, styles.cFlag]}>Review flags</Text>
+        </View>
+
+        {docs.map((d) => (
+          <View key={d.doc_key} style={styles.tRow} wrap={false}>
+            <Text style={[styles.td, styles.cId]}>{d.doc_key}</Text>
+            <Text style={[styles.td, styles.cPg]}>{summariseRuns(d.pages)}</Text>
+            <Text style={[styles.td, styles.cTy]}>{dash(d.doc_type)}</Text>
+            <Text style={[styles.td, styles.cDesc]}>
+              {d.excluded ? 'Excluded — belongs to no document' : dash(d.title)}
+            </Text>
+            <Text style={[styles.td, styles.cDt]}>{dash(d.doc_date)}</Text>
+            <Text style={[styles.td, styles.cAu]}>
+              {dash(d.author)}
+              {d.discipline ? `\n${d.discipline}` : ''}
+            </Text>
+            <Text style={[styles.td, styles.cOrg]}>{dash(d.org)}</Text>
+            <Text
+              style={[
+                styles.td,
+                styles.cCl,
+                d.relates === 'no' ? styles.bad : d.relates === 'uncertain' ? styles.warn : {},
+              ]}
+            >
+              {d.relates}
+            </Text>
+            <Text style={[styles.td, styles.cDup]}>{dash(d.dup_of)}</Text>
+            <Text style={[styles.td, styles.cFlag, styles.warn]}>
+              {d.review_flags.join('; ')}
+              {d.relates_reason ? ` (${d.relates_reason})` : ''}
+            </Text>
+          </View>
+        ))}
+
+        <Footer />
+      </Page>
+
+      {/* ---------------------------------------------------- what to check */}
+      <Page size="A4" orientation="landscape" style={styles.page}>
+        <Text style={styles.h1}>What needs a human eye</Text>
+        <Text style={styles.body}>
+          Listed here because a wrong answer costs more than an admitted
+          uncertainty. Everything below was still split and exported; these are
+          the places where the automatic reading should not be taken on trust.
+        </Text>
+
+        <Text style={styles.h2}>Pages excluded from every document ({excluded.length})</Text>
+        {excluded.length === 0 ? (
+          <Text style={styles.body}>None.</Text>
+        ) : (
+          excluded.map((d) => (
+            <Text key={d.doc_key} style={styles.body}>
+              {d.doc_key} — page {summariseRuns(d.pages)}:{' '}
+              {d.review_flags.join('; ') || 'blank page'}
+            </Text>
+          ))
+        )}
+
+        <Text style={styles.h2}>May not concern the client ({otherPerson.length + uncertain.length})</Text>
+        {otherPerson.length + uncertain.length === 0 ? (
+          <Text style={styles.body}>None.</Text>
+        ) : (
+          [...otherPerson, ...uncertain].map((d) => (
+            <Text key={d.doc_key} style={styles.body}>
+              {d.doc_key} (pages {summariseRuns(d.pages)}) — {d.relates.toUpperCase()}:{' '}
+              {d.relates_reason ?? 'no reason recorded'}
+            </Text>
+          ))
+        )}
+
+        <Text style={styles.h2}>Possible duplicates ({dups.length})</Text>
+        {dups.length === 0 ? (
+          <Text style={styles.body}>None.</Text>
+        ) : (
+          dups.map((d) => (
+            <Text key={d.doc_key} style={styles.body}>
+              {d.doc_key} (pages {summariseRuns(d.pages)}) appears to duplicate {d.dup_of}.
+              Both have been exported; neither was discarded.
+            </Text>
+          ))
+        )}
+
+        <Text style={styles.h2}>Documents whose pages are not contiguous ({nonContiguous.length})</Text>
+        {nonContiguous.length === 0 ? (
+          <Text style={styles.body}>None.</Text>
+        ) : (
+          nonContiguous.map((d) => (
+            <Text key={d.doc_key} style={styles.body}>
+              {d.doc_key} is made of pages {d.pages.join(', ')} — unrelated pages sit
+              between them in the original. Worth confirming.
+            </Text>
+          ))
+        )}
+
+        <Text style={styles.h2}>Other review flags</Text>
+        {flagged.filter((d) => !d.dup_of && d.relates === 'yes').length === 0 ? (
+          <Text style={styles.body}>None.</Text>
+        ) : (
+          flagged
+            .filter((d) => !d.dup_of && d.relates === 'yes')
+            .map((d) => (
+              <Text key={d.doc_key} style={styles.body}>
+                {d.doc_key} (pages {summariseRuns(d.pages)}): {d.review_flags.join('; ')}
+              </Text>
+            ))
+        )}
+
+        <Footer />
+      </Page>
+
+      {/* -------------------------------------------------- design choices */}
+      <Page size="A4" orientation="landscape" style={styles.page}>
+        <Text style={styles.h1}>How this was built, and why</Text>
+
+        <Text style={styles.h3}>The shape of the problem</Text>
+        <Text style={styles.body}>
+          A bundle is too large to judge in one pass, the same judgement has to
+          hold across hundreds of pages, every decision has to trace back to its
+          pages, and a reviewer is waiting. Those four constraints, not the
+          interface, drove the design.
+        </Text>
+
+        <Text style={styles.h3}>A document owns a set of pages, not a page range</Text>
+        <Text style={styles.body}>
+          The central data decision. Documents in a scanned bundle are not always
+          contiguous — this bundle contains a report whose two pages are
+          separated by a page belonging to someone else entirely. A
+          start-page/end-page model cannot express that, and would have forced a
+          wrong answer. Storing page membership also makes the first ground rule
+          a database constraint rather than a hope: the page table is keyed on
+          (proposal, page number), so a page physically cannot be written into
+          two documents at once.
+        </Text>
+
+        <Text style={styles.h3}>How the work is divided</Text>
+        <Text style={styles.body}>
+          Two passes with different characters. Pass A reads the bundle in
+          overlapping ten-page windows and describes each page on its own terms:
+          what it is, who wrote it, whose it is, whether it carries a
+          &quot;page n of m&quot; marker, whether it reads as a continuation. This is
+          local, parallel, and the only non-deterministic step. Pass B then
+          groups those described pages into documents using a fixed decision
+          procedure — no model call at all. Grouping is global and needs the
+          whole picture, so doing it inside a window would have turned every
+          window edge into a false document boundary. Windows overlap by two
+          pages so that no page is ever judged without seeing what came before
+          it, and where the two windows disagree the one with more preceding
+          context wins.
+        </Text>
+
+        <Text style={styles.h3}>How results are kept consistent</Text>
+        <Text style={styles.body}>
+          By moving every judgement that can be deterministic out of the model.
+          Grouping, duplicate grouping, page accounting, filename generation and
+          validation are ordinary code: they produce the same answer every run
+          and can be read and argued with. The starting point is also
+          deliberately dull — every page begins as its own document, which on
+          this bundle is already correct for most of them — so the model is only
+          ever asked to justify merging pages together, never to find boundaries
+          in a wall of text. A merge happens only when something concrete
+          supports it: an unbroken page-marker sequence, an explicit
+          continuation, or a shared organisation and date with no new letterhead.
+        </Text>
+
+        <Text style={styles.h3}>How it stays traceable</Text>
+        <Text style={styles.body}>
+          Every child PDF records the original bundle pages it came from in its
+          own metadata, and this register lists them again. Each revision of the
+          split is stored in full rather than as a patch, so any earlier state
+          can be reproduced exactly, and the operations that produced it are kept
+          alongside as an audit trail. Pages are copied, never re-rendered, so a
+          split page is byte-for-byte the original — including the two pages
+          whose declared rotation makes them display wrongly, which are
+          reproduced as they are rather than silently corrected.
+        </Text>
+
+        <Text style={styles.h3}>How it stays affordable</Text>
+        <Text style={styles.body}>
+          Three levers. The client brief and type taxonomy are sent as a cached
+          prompt prefix, so they are paid for once rather than on each of the
+          two dozen windows. Pages that already carry a text layer have that text
+          passed through directly, so the model is not asked to re-read what is
+          already machine readable. And a reviewer&apos;s feedback round never
+          re-reads the bundle: it sees only the current register and the pages the
+          feedback actually names, which is what makes iterating cheap enough to
+          do as often as the reviewer likes.
+        </Text>
+
+        <Text style={styles.h3}>What we refuse to guess</Text>
+        <Text style={styles.body}>
+          Unreadable or absent fields are recorded as unknown rather than filled
+          with something plausible, and documents that may concern another person
+          are flagged rather than dropped. Nothing is ever discarded on the
+          system&apos;s own authority: suspected duplicates and material about
+          other people are still exported, still listed, and simply marked.
+        </Text>
+
+        <Text style={styles.h3}>Known limits of this prototype</Text>
+        <Text style={styles.body}>
+          Login, scale and deployment hardening are out of scope, as the brief
+          allows. The client brief is fixed to this matter rather than captured
+          per session. Searchability of scanned pages depends on an in-browser
+          OCR pass that runs separately from identification; where it had not
+          finished, those pages are exported faithfully but without a text layer.
+          Illegibility is reported from the model&apos;s own reading of a page
+          rather than measured.
+        </Text>
+
+        <Footer />
+      </Page>
+    </Document>
+  );
+}
+
+export async function renderSummaryPdf(input: SummaryInput): Promise<Uint8Array> {
+  const buf = await renderToBuffer(<SummaryDoc {...input} />);
+  return new Uint8Array(buf);
+}
