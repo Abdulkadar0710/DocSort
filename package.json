@@ -11,7 +11,9 @@
     "postinstall": "npm run copy-pdf-worker",
     "test:ops": "tsx scripts/test-ops.ts",
     "ingest": "tsx scripts/ingest.ts",
-    "score": "tsx scripts/score.ts"
+    "score": "tsx scripts/score.ts",
+    "test:polyfill": "tsx scripts/test-polyfill.ts",
+    "test": "npm run test:ops && npm run test:polyfill"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.1.0",

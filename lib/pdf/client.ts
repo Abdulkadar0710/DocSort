@@ -1,5 +1,8 @@
 'use client';
 
+// Must come before pdf.js: it patches Map/WeakMap methods pdf.js v6 relies on
+// and older browsers lack. ES modules evaluate in import order.
+import './map-polyfill';
 import * as pdfjs from 'pdfjs-dist';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { PageInventory } from '@/lib/types';
@@ -13,9 +16,10 @@ import type { PageInventory } from '@/lib/types';
  * extraction never touches a Vercel function's duration budget.
  */
 
-// The worker is copied into /public by the `copy-pdf-worker` npm script, which
-// also runs on postinstall so it cannot drift from the installed version.
-pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
+// Points at a shim that polyfills the worker's own global scope before loading
+// the real worker — a main-thread polyfill does not reach it. Both files live
+// in /public, kept current by the `copy-pdf-worker` npm script.
+pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.shim.mjs';
 
 /**
  * Bundle bytes, cached per url for the life of the tab.
