@@ -32,6 +32,14 @@ export function DocumentSidebar({ docs, people = [], activePage, onJump }: Props
   const real = docs.filter((d) => !d.excluded).length;
   const identified = docs.filter((d) => !d.excluded && d.doc_type).length;
 
+  // Same page-order colour index the preview uses, so a document's swatch here
+  // matches its rule over there. The register itself is ordered by person.
+  const colourIndex = new Map(
+    [...docs]
+      .sort((a, b) => Math.min(...a.pages, Infinity) - Math.min(...b.pages, Infinity))
+      .map((d, i) => [d.doc_key, i]),
+  );
+
   return (
     <div className="flex h-full flex-col border-r border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
       <div className="border-b border-slate-200 px-3 py-3 dark:border-slate-800">
@@ -60,7 +68,7 @@ export function DocumentSidebar({ docs, people = [], activePage, onJump }: Props
           const person = startsPerson
             ? people.find((p) => p.key === personKey)
             : undefined;
-          const color = colorFor(i, d.excluded);
+          const color = colorFor(colourIndex.get(d.doc_key) ?? i, d.excluded);
           const isActive = activePage !== null && d.pages.includes(activePage);
           const serious = d.review.filter((f) => SERIOUS_REVIEW_CODES.includes(f.code));
           // With a person header above, repeating "another person" on every

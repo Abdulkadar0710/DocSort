@@ -153,9 +153,16 @@ export async function saveRevision(
     .single();
   if (pErr) throw pErr;
 
-  const ordered = [...docs].sort(
-    (a, b) => Math.min(...a.pages) - Math.min(...b.pages),
-  );
+  // The caller's order is the register's order, and it is preserved exactly.
+  //
+  // This used to re-sort by first page, which quietly undid the person
+  // grouping: documents were keyed D001-D003 for the client and D004-D006 for
+  // the next person, then written back interleaved by page, so the register
+  // showed the same person's name over and over down the list instead of once
+  // per block. Page order still governs the PREVIEW, which reads the original
+  // bundle and must never be reordered — but that is a property of the pages,
+  // not of the register.
+  const ordered = [...docs];
 
   const { data: insertedDocs, error: dErr } = await sb
     .from('documents')

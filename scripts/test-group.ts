@@ -156,6 +156,42 @@ check('provenance recorded in the overview', (holding(3).overview ?? '').include
   check('unidentified documents stay separate', g.length === 2, String(g.length));
 }
 
+// ---------------------------------------------------------------------------
+// The register reads as whole people: every document of one person together,
+// then the next. Interleaving them was the bug that made the sidebar repeat
+// the same name down the page.
+{
+  const mixed = [
+    doc('M1', 1, 'Prescriptions', { person_name: 'Daniel James Marsh', person_dob: '14/03/1984', person_key: null }),
+    doc('M2', 2, 'Imaging Reports', { person_name: 'Kylie Anne Marsh', person_dob: '21/06/1986', person_key: null }),
+    doc('M3', 3, 'Imaging Reports', { person_name: 'Jason Petrakis', person_dob: '02/09/1979', person_key: null }),
+    doc('M4', 4, 'Imaging Reports', { person_name: 'Daniel James Marsh', person_dob: '14/03/1984', person_key: null }),
+    doc('M5', 5, 'Prescriptions', { person_name: 'Kylie Anne Marsh', person_dob: '21/06/1986', person_key: null }),
+    doc('M6', 6, 'Prescriptions', { person_name: 'Jason Petrakis', person_dob: '02/09/1979', person_key: null }),
+  ];
+  const c = clusterPeople(mixed.map((d) => ({ ...d })), {
+    name: 'Daniel James Marsh',
+    dob: '14/03/1984',
+  });
+  const { docs: g } = groupByCategory(c.docs, c.people.map((p) => p.key));
+
+  const order = g.map((d) => d.person_name);
+  const blocks = order.filter((n, i) => i === 0 || n !== order[i - 1]);
+  check(
+    'each person appears as one unbroken block',
+    blocks.length === new Set(blocks).size,
+    order.join(' | '),
+  );
+  check('the client leads the register', g[0].person_name === 'Daniel James Marsh', String(g[0].person_name));
+  check('keys run in register order', g.map((d) => d.doc_key).join() === 'D001,D002,D003,D004,D005,D006');
+
+  // Colour is assigned from PAGE order, so neighbours in the preview differ
+  // even though the register is ordered by person.
+  const byPage = [...g].sort((a, b) => Math.min(...a.pages) - Math.min(...b.pages));
+  const adjacentClash = byPage.some((d, i) => i > 0 && (i % 8) === ((i - 1) % 8));
+  check('page-adjacent documents never share a colour slot', !adjacentClash);
+}
+
 // A single document in its own category is left exactly as it was.
 {
   const { docs: only, merged: m } = groupByCategory([doc('D001', 1, 'Receipts')]);

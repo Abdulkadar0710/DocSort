@@ -71,17 +71,33 @@ export function BundleViewer({
     return set;
   }, [center]);
 
-  // page number -> { doc, index in register, position within the document }
+  // page number -> { doc, colour index, position within the document }
+  //
+  // The colour index comes from PAGE order, never the register's order. The
+  // brief's one hard rule about colour is that two adjacent documents never
+  // share one, and adjacency is what the reviewer sees while scrolling. Once
+  // the register began listing whole people rather than following the bundle,
+  // its index stopped tracking what sits next to what.
   const pageMap = useMemo(() => {
+    const byFirstPage = [...docs].sort(
+      (a, b) => Math.min(...a.pages, Infinity) - Math.min(...b.pages, Infinity),
+    );
+    const colourIndex = new Map(byFirstPage.map((d, i) => [d.doc_key, i]));
+
     const m = new Map<
       number,
       { doc: ProposalDoc; index: number; pos: number; of: number }
     >();
-    docs.forEach((d, index) => {
+    for (const d of docs) {
       d.pages.forEach((p, pos) => {
-        m.set(p, { doc: d, index, pos, of: d.pages.length });
+        m.set(p, {
+          doc: d,
+          index: colourIndex.get(d.doc_key) ?? 0,
+          pos,
+          of: d.pages.length,
+        });
       });
-    });
+    }
     return m;
   }, [docs]);
 
