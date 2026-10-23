@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { BundleViewer, type ViewerPage } from '@/components/BundleViewer';
 import { DocumentSidebar } from '@/components/DocumentSidebar';
 import { FeedbackPanel } from '@/components/FeedbackPanel';
+import { SessionsRail } from '@/components/SessionsRail';
 import type { Proposal } from '@/lib/types';
 import type { ValidationResult } from '@/lib/proposal/validate';
 
@@ -82,6 +83,8 @@ export function Workspace({ sessionId: id }: { sessionId: string }) {
   const [scrollTo, setScrollTo] = useState<{ page: number; nonce: number }>();
   const [highlight, setHighlight] = useState<number[]>([]);
   const [stalled, setStalled] = useState('');
+  const [approving, setApproving] = useState(false);
+  const [approveError, setApproveError] = useState('');
   const [ocrProgress, setOcrProgress] = useState<{ done: number; total: number } | null>(null);
 
   const load = useCallback(async () => {
@@ -184,6 +187,25 @@ export function Workspace({ sessionId: id }: { sessionId: string }) {
     setScrollTo({ page, nonce: Date.now() });
   }, []);
 
+  const approve = useCallback(async () => {
+    setApproving(true);
+    setApproveError('');
+    try {
+      const res = await fetch('/api/approve', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ session_id: id }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? 'could not produce the outputs');
+      await load();
+    } catch (e) {
+      setApproveError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setApproving(false);
+    }
+  }, [id, load]);
+
   if (error) {
     return (
       <main className="mx-auto max-w-2xl px-6 py-16">
@@ -208,54 +230,66 @@ export function Workspace({ sessionId: id }: { sessionId: string }) {
   const approved = session.status === 'approved';
 
   return (
-    <main className="flex h-dvh flex-col">
-      <header className="shrink-0 border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+    <main className="flex h-dvh flex-col bg-white dark:bg-slate-900">
+      <header className="shrink-0 border-b border-slate-200 dark:border-slate-800">
         <div className="flex items-center gap-3 px-4 py-2.5">
-          <Link
-            href="/"
-            className="shrink-0 whitespace-nowrap text-sm text-slate-500 transition hover:text-slate-900 dark:hover:text-slate-100"
-          >
-            ← Sessions
-          </Link>
-
-          <div className="min-w-0 flex-1">
-            <h1 className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
-              {session.name}
-            </h1>
-            <p className="truncate text-xs text-slate-500 dark:text-slate-400">
-              {session.page_count ?? '—'} pages
-              {proposal ? ` · revision ${proposal.revision}` : ''}
-              {approved ? ' · approved' : ''}
-            </p>
-          </div>
+          <h1 className="shrink-0 truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
+            {session.name}
+          </h1>
+          <p className="min-w-0 flex-1 truncate text-xs text-slate-500 dark:text-slate-400">
+            {proposal ? `Proposal v${proposal.revision}` : 'Preparing'}
+            {' · '}
+            {approved ? 'approved' : 'awaiting approval'}
+            {session.page_count ? ` · ${session.page_count} pages` : ''}
+          </p>
 
           {processing && !stalled && (
-            <span className="flex shrink-0 items-center gap-2 whitespace-nowrap text-xs text-slate-600 dark:text-slate-400">
-              <span className="h-2 w-2 animate-pulse rounded-full bg-amber-500" />
-              {progress.done} of {progress.total} sections
+            <span className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs text-slate-500 dark:text-slate-400">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500" />
+              {progress.done} of {progress.total}
             </span>
           )}
 
           {ocrProgress && (
             <span
               title="Reading scanned pages so the exported documents are searchable. Nothing waits for this."
-              className="hidden shrink-0 whitespace-nowrap text-xs text-slate-500 lg:inline dark:text-slate-400"
+              className="hidden shrink-0 whitespace-nowrap text-xs text-slate-400 xl:inline"
             >
-              Making scans searchable — {ocrProgress.done}/{ocrProgress.total}
+              scans {ocrProgress.done}/{ocrProgress.total}
             </span>
           )}
 
           {validation && <PageAccountingBadge v={validation} />}
+
+          {!approved && (
+            <button
+              type="button"
+              onClick={() => void approve()}
+              disabled={!proposal || processing || approving || !validation?.ok}
+              title={
+                validation?.ok
+                  ? 'Split the bundle and produce the outputs'
+                  : 'Page accounting must balance before approving'
+              }
+              className="shrink-0 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-blue-700 disabled:opacity-40"
+            >
+              {approving ? 'Splitting…' : 'Approve split'}
+            </button>
+          )}
         </div>
 
-        {stalled && (
+        {(stalled || approveError) && (
           <p className="border-t border-amber-200 bg-amber-50 px-4 py-1.5 text-xs leading-snug text-amber-900 dark:border-amber-900 dark:bg-amber-950/60 dark:text-amber-300">
-            {stalled}
+            {approveError || stalled}
           </p>
         )}
       </header>
 
-      <div className="grid min-h-0 flex-1 grid-cols-[clamp(240px,22vw,340px)_1fr_clamp(280px,26vw,420px)]">
+      {/* Sessions · Documents · Preview · Refine — the four things the reviewer
+          moves between, all visible at once so none of them is a detour. */}
+      <div className="grid min-h-0 flex-1 grid-cols-[clamp(130px,11vw,180px)_clamp(150px,13vw,220px)_1fr_clamp(220px,20vw,320px)]">
+        <SessionsRail currentId={id} />
+
         <DocumentSidebar
           docs={proposal?.docs ?? []}
           activePage={activePage}

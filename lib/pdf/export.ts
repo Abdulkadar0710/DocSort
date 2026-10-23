@@ -21,33 +21,38 @@ export interface ChildPdf {
   pageCount: number;
 }
 
-/** Turn a document's identified details into a filename a reviewer can scan.
- *  The brief asks for child PDFs "named so a reviewer can tell what each one
- *  is", so the key, date, type and source organisation all appear. */
-export function childFilename(doc: ProposalDoc): string {
-  const clean = (s: string | null, max = 40) =>
-    (s ?? '')
-      .replace(/[^\p{L}\p{N}\s&'-]/gu, ' ')
-      .trim()
-      .replace(/\s+/g, '-')
-      .slice(0, max)
-      .replace(/-+$/, '');
+/**
+ * Name a child PDF: "D001 Letters.pdf".
+ *
+ * The document key carries the provenance — it is what the summary PDF, the
+ * sidebar and the reviewer's own feedback all refer to — and a single plural
+ * noun says what kind of thing it is. That noun comes from the category's
+ * `short_label`, which the taxonomy pass produces alongside the category
+ * itself, so naming stays model-managed rather than mapped in code.
+ *
+ * Deliberately short. Packing the date, full category and issuing organisation
+ * into the name produced things like
+ * "D001_2024-02-05_Legal-correspondence_Ashford-Lane-Lawyers.pdf", which is
+ * unreadable in a file listing and truncated by most mail clients. All of that
+ * detail is in the summary PDF, and in the child PDF's own metadata.
+ */
+export function childFilename(
+  doc: ProposalDoc,
+  labelFor?: (categoryName: string | null) => string | null,
+): string {
+  const fallback = (doc.doc_type ?? 'Documents')
+    .replace(/[^A-Za-z\s]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w && !/^(and|or|the|of|a|an)$/i.test(w))
+    .pop();
 
-  // DD/MM/YYYY sorts badly in a file listing; ISO does not.
-  let date = '';
-  const m = /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/.exec(doc.doc_date ?? '');
-  if (m) date = `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
-  else if (doc.doc_date && /^\d{4}-\d{2}-\d{2}$/.test(doc.doc_date)) date = doc.doc_date;
-  else date = 'undated';
+  const raw = labelFor?.(doc.doc_type) ?? fallback ?? 'Documents';
+  const word = raw.trim().replace(/[^A-Za-z\s]/g, '').split(/\s+/).slice(0, 2).join(' ');
+  const label = word
+    ? word[0].toUpperCase() + word.slice(1)
+    : 'Documents';
 
-  const parts = [
-    doc.doc_key,
-    date,
-    clean(doc.excluded ? 'Excluded' : doc.doc_type ?? 'Unidentified', 34),
-    clean(doc.org, 28),
-  ].filter(Boolean);
-
-  return `${parts.join('_')}.pdf`.replace(/_+/g, '_');
+  return `${doc.doc_key} ${/s$/i.test(label) ? label : `${label}s`}.pdf`;
 }
 
 /**
@@ -106,7 +111,10 @@ export async function buildChildPdfs(
   bundleBytes: Uint8Array,
   docs: ProposalDoc[],
   ocrByPage: Map<number, OcrWord[]>,
+  /** category name -> its short plural label, from the derived taxonomy. */
+  shortLabels: Map<string, string> = new Map(),
 ): Promise<ChildPdf[]> {
+  const labelFor = (name: string | null) => (name ? shortLabels.get(name) ?? null : null);
   const src = await PDFDocument.load(bundleBytes, { ignoreEncryption: true });
   const total = src.getPageCount();
   const children: ChildPdf[] = [];
@@ -152,7 +160,7 @@ export async function buildChildPdfs(
 
     children.push({
       doc_key: doc.doc_key,
-      filename: childFilename(doc),
+      filename: childFilename(doc, labelFor),
       bytes: await out.save(),
       pageCount: indices.length,
     });

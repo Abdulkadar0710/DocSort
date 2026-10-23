@@ -160,10 +160,29 @@ export function BundleViewer({
     return () => observer.disconnect();
   }, [pages.length, onVisiblePageChange]);
 
+  // Jump to a page when the register is clicked.
+  //
+  // Positioned directly rather than with smooth scrolling: pages rasterise as
+  // they come into range, and the resulting layout shifts cancelled the smooth
+  // animation partway, leaving the reviewer wherever it happened to stop. The
+  // slots carry their true aspect ratio from the start, so offsetTop is exact
+  // even for pages that have not been drawn yet.
   useEffect(() => {
     if (!scrollTo) return;
     const el = slotRefs.current.get(scrollTo.page);
-    el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const root = scrollerRef.current;
+    if (!el || !root) return;
+    // Measured from rects rather than offsetTop: each page sits inside a
+    // positioned wrapper, which makes it the offsetParent, so offsetTop reports
+    // a few pixels within that wrapper instead of the distance down the
+    // scroller.
+    const top =
+      el.getBoundingClientRect().top -
+      root.getBoundingClientRect().top +
+      root.scrollTop -
+      8;
+    root.scrollTo({ top: Math.max(0, top), behavior: 'auto' });
+    setCenter(scrollTo.page);
   }, [scrollTo]);
 
   if (loadError) {
@@ -195,80 +214,101 @@ export function BundleViewer({
         const excluded = entry?.doc.excluded ?? false;
 
         return (
-          <div key={p.page_number}>
-            {/* A clear gap between documents, so a boundary is visible even
-                where two neighbours' colours are similar on screen. */}
-            {isFirst && p.page_number !== pages[0].page_number && (
-              <div className="h-6" />
-            )}
+          // Pages are held to a modest width on purpose. The reviewer's task
+          // here is to see how the bundle was divided, which means taking in
+          // several pages and the boundaries between them at once; a page
+          // rendered large enough to read line by line shows one at a time and
+          // hides exactly what they came to check.
+          <div key={p.page_number} className="relative mx-auto w-full max-w-[420px]">
+            {/* A gap between documents, so a boundary reads even where two
+                neighbouring colours look similar on screen. */}
+            {isFirst && p.page_number !== pages[0].page_number && <div className="h-5" />}
 
-            {isFirst && entry && (
-              <div
-                className="flex items-center gap-2 rounded-t-md px-3 py-1.5 text-xs font-medium"
-                style={{
-                  background: color.chip,
-                  color: color.chipText,
-                  borderTop: `3px solid ${color.line}`,
-                }}
-              >
-                <span className="font-semibold">{entry.doc.doc_key}</span>
-                <span className="truncate">
-                  {excluded
-                    ? 'Excluded — not part of any document'
-                    : entry.doc.title || entry.doc.doc_type || 'Unidentified document'}
-                </span>
-                <span className="ml-auto shrink-0 opacity-70">
-                  {entry.of === 1 ? '1 page' : `${entry.of} pages`}
-                </span>
-              </div>
-            )}
-
-            <div
-              data-page={p.page_number}
-              ref={(el) => {
-                if (el) slotRefs.current.set(p.page_number, el);
-                else slotRefs.current.delete(p.page_number);
-              }}
-              className={`relative ${isLast ? 'mb-0' : 'mb-1'}`}
-              style={{
-                background: color.fill,
-                borderLeft: `3px solid ${color.line}`,
-                borderRight: `3px solid ${color.line}`,
-                borderBottom: isLast ? `3px solid ${color.line}` : 'none',
-                // Reserve the correct height before the canvas exists, so the
-                // scrollbar never jumps as pages rasterise.
-                aspectRatio: `${p.width} / ${p.height}`,
-                outline: highlight.has(p.page_number) ? '3px solid #f59e0b' : undefined,
-                outlineOffset: '-3px',
-              }}
-            >
-              {excluded && (
+            <div className="flex items-stretch gap-2">
+              {/* The coloured rule runs down the whole document rather than
+                  boxing each page, so where one ends and the next begins is
+                  legible at a glance while scrolling. */}
+              <div className="relative w-1 shrink-0">
                 <div
-                  className="pointer-events-none absolute inset-0 z-10"
+                  className="absolute inset-x-0"
                   style={{
-                    backgroundImage:
-                      'repeating-linear-gradient(45deg, rgba(100,116,139,0.18) 0 10px, transparent 10px 20px)',
+                    background: color.line,
+                    top: isFirst ? 4 : 0,
+                    bottom: isLast ? 4 : 0,
+                    borderTopLeftRadius: isFirst ? 2 : 0,
+                    borderTopRightRadius: isFirst ? 2 : 0,
+                    borderBottomLeftRadius: isLast ? 2 : 0,
+                    borderBottomRightRadius: isLast ? 2 : 0,
+                    opacity: excluded ? 0.45 : 1,
                   }}
                 />
-              )}
+              </div>
 
-              <PageCanvas
-                doc={doc}
-                pageNumber={p.page_number}
-                active={live.has(p.page_number)}
-              />
+              <div
+                data-page={p.page_number}
+                ref={(el) => {
+                  if (el) slotRefs.current.set(p.page_number, el);
+                  else slotRefs.current.delete(p.page_number);
+                }}
+                className={`relative min-w-0 flex-1 bg-white shadow-sm dark:bg-slate-100 ${
+                  isLast ? '' : 'mb-1'
+                }`}
+                style={{
+                  aspectRatio: `${p.width} / ${p.height}`,
+                  border: excluded
+                    ? `1.5px dashed ${color.line}`
+                    : '1px solid rgba(100,116,139,0.25)',
+                  outline: highlight.has(p.page_number) ? '2px solid #f59e0b' : undefined,
+                  outlineOffset: 1,
+                }}
+              >
+                {excluded ? (
+                  // Excluded pages are shown as a stated outcome, not a blank
+                  // gap. The brief's whole trust argument rests on every page
+                  // visibly belonging somewhere or being deliberately set aside.
+                  <div className="flex h-full w-full items-center justify-center">
+                    <span className="text-[11px] font-medium text-slate-400">
+                      Blank page · excluded
+                    </span>
+                  </div>
+                ) : (
+                  <PageCanvas
+                    doc={doc}
+                    pageNumber={p.page_number}
+                    active={live.has(p.page_number)}
+                  />
+                )}
 
-              <span className="absolute bottom-1 right-2 z-20 rounded bg-white/85 px-1.5 py-0.5 text-[10px] font-medium text-slate-700 shadow-sm dark:bg-slate-900/85 dark:text-slate-300">
-                p.{p.page_number}
-                {!p.has_text_layer && (
+                <span className="absolute bottom-1 right-1.5 z-20 rounded bg-white/85 px-1 text-[9px] font-medium text-slate-500">
+                  p{p.page_number}
+                  {!p.has_text_layer && !excluded && (
+                    <span
+                      className="ml-1 opacity-70"
+                      title="No text layer in the original — read by OCR"
+                    >
+                      scan
+                    </span>
+                  )}
+                </span>
+              </div>
+
+              {/* The document chip sits beside the page it starts on, so the
+                  key the reviewer types into feedback is always in view. */}
+              <div className="w-12 shrink-0 pt-0.5">
+                {isFirst && entry && (
                   <span
-                    className="ml-1 opacity-70"
-                    title="No text layer in the original — read by OCR"
+                    className="inline-block rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold"
+                    style={{ background: color.chip, color: color.chipText }}
+                    title={
+                      excluded
+                        ? 'Belongs to no document'
+                        : (entry.doc.title ?? entry.doc.doc_type ?? '')
+                    }
                   >
-                    scan
+                    {entry.doc.doc_key}
                   </span>
                 )}
-              </span>
+              </div>
             </div>
           </div>
         );

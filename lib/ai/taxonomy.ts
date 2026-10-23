@@ -46,12 +46,19 @@ const taxonomyTool = (min: number, max: number): Anthropic.Tool => ({
         maxItems: max,
         items: {
           type: 'object',
-          required: ['name', 'description'],
+          required: ['name', 'description', 'short_label'],
           properties: {
             name: { type: 'string', description: 'Short noun phrase, title case.' },
             description: {
               type: 'string',
               description: 'One line: what belongs in this category.',
+            },
+            short_label: {
+              type: 'string',
+              description:
+                'ONE word where possible, plural, for filenames: Letters, ' +
+                'Reports, Notes, Certificates, Forms, Scans. Two words only if ' +
+                'one genuinely will not do. No punctuation.',
             },
           },
         },
@@ -78,7 +85,7 @@ export async function loadCategories(
 ): Promise<Category[]> {
   let q = sb
     .from('categories')
-    .select('id, name, description, origin, reason, active, sort_order')
+    .select('id, name, description, short_label, origin, reason, active, sort_order')
     .order('sort_order')
     .order('name');
   if (opts.activeOnly !== false) q = q.eq('active', true);
@@ -95,6 +102,7 @@ export async function ensureCategory(
   input: {
     name: string;
     description: string;
+    shortLabel?: string | null;
     origin: Category['origin'];
     reason?: string | null;
     sessionId?: string | null;
@@ -109,6 +117,7 @@ export async function ensureCategory(
   const { error } = await sb.from('categories').insert({
     name: input.name,
     description: input.description,
+    short_label: input.shortLabel ?? deriveShortLabel(input.name),
     origin: input.origin,
     reason: input.reason ?? null,
     origin_session_id: input.sessionId ?? null,
@@ -121,8 +130,20 @@ export async function ensureCategory(
 }
 
 export interface TaxonomyResult {
-  categories: { name: string; description: string }[];
+  categories: { name: string; description: string; short_label: string }[];
   usage: Usage;
+}
+
+/** Fallback when the model gives no usable short label: the last substantive
+ *  word of the category name, pluralised. "Specialist Letters" -> "Letters". */
+export function deriveShortLabel(name: string): string {
+  const words = name
+    .replace(/[^A-Za-z\s]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w && !/^(and|or|the|of|a|an)$/i.test(w));
+  const last = words[words.length - 1] ?? 'Documents';
+  const word = last[0].toUpperCase() + last.slice(1);
+  return /s$/i.test(word) ? word : `${word}s`;
 }
 
 export async function deriveTaxonomy(docs: ProposalDoc[]): Promise<TaxonomyResult> {
@@ -164,22 +185,40 @@ export async function deriveTaxonomy(docs: ProposalDoc[]): Promise<TaxonomyResul
   });
 
   const { categories } = toolResult<{
-    categories: { name?: string; description?: string }[];
+    categories: { name?: string; description?: string; short_label?: string }[];
   }>(res.content, 'propose_categories');
 
   const cleaned = (categories ?? [])
-    .map((c) => ({
-      name: (c.name ?? '').trim(),
-      description: (c.description ?? '').trim(),
-    }))
+    .map((c) => {
+      const name = (c.name ?? '').trim();
+      const label = (c.short_label ?? '')
+        .trim()
+        .replace(/[^A-Za-z\s]/g, '')
+        .split(/\s+/)
+        .slice(0, 2)
+        .join(' ');
+      return {
+        name,
+        description: (c.description ?? '').trim(),
+        short_label: label || deriveShortLabel(name || 'Documents'),
+      };
+    })
     .filter((c) => c.name && c.description);
 
   // These two must exist whatever the model proposed: every bundle has blank
   // pages to set aside, and every taxonomy needs somewhere to put the thing it
   // did not anticipate.
   for (const required of [
-    { name: 'Other', description: 'Does not fit any other category; a new one may be proposed.' },
-    { name: 'Excluded', description: 'Blank or contentless page belonging to no document.' },
+    {
+      name: 'Other',
+      description: 'Does not fit any other category; a new one may be proposed.',
+      short_label: 'Documents',
+    },
+    {
+      name: 'Excluded',
+      description: 'Blank or contentless page belonging to no document.',
+      short_label: 'Excluded',
+    },
   ]) {
     if (!cleaned.some((c) => normaliseName(c.name) === normaliseName(required.name))) {
       cleaned.push(required);
@@ -201,6 +240,7 @@ export async function deriveAndStoreTaxonomy(
     await ensureCategory(sb, {
       name: c.name,
       description: c.description,
+      shortLabel: c.short_label,
       origin: 'derived',
       sessionId,
       // "Other" and "Excluded" sort last wherever the model happened to put them.

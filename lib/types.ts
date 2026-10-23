@@ -27,6 +27,8 @@ export interface Category {
   id: string;
   name: string;
   description: string;
+  /** One or two words, plural — used to name child PDFs. */
+  short_label: string | null;
   origin: 'derived' | 'proposed' | 'manual';
   reason: string | null;
   active: boolean;

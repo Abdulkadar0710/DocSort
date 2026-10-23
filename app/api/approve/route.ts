@@ -93,7 +93,11 @@ export async function POST(req: Request) {
       }
     }
 
-    const children = await buildChildPdfs(bundle, proposal.docs, ocrByPage);
+    const categories = await loadCategories(sb, { activeOnly: false });
+    const shortLabels = new Map(
+      categories.filter((c) => c.short_label).map((c) => [c.name, c.short_label!]),
+    );
+    const children = await buildChildPdfs(bundle, proposal.docs, ocrByPage, shortLabels);
 
     const { count: feedbackRounds } = await sb
       .from('messages')
@@ -112,11 +116,12 @@ export async function POST(req: Request) {
       approvedAt,
       ocrPageCount,
       ocrTextLayerCount,
-      categories: await loadCategories(sb, { activeOnly: false }),
+      categories,
     });
 
+    // Plain "Summary.pdf" to sit alongside "D001 Letters.pdf" in the listing.
     const safeName = session.name.replace(/[^\p{L}\p{N}-]+/gu, '-').slice(0, 40);
-    const summaryName = `${safeName}_summary.pdf`;
+    const summaryName = 'Summary.pdf';
 
     // One archive so the reviewer can take the whole evidence set in a click.
     const zip = new JSZip();
@@ -167,12 +172,12 @@ export async function POST(req: Request) {
       document_id: null,
     });
 
-    const zipPath = `${base}/${safeName}_documents.zip`;
+    const zipPath = `${base}/${safeName}-documents.zip`;
     await put(zipPath, zipBytes, 'application/zip');
     uploads.push({
       kind: 'zip',
       path: zipPath,
-      filename: `${safeName}_documents.zip`,
+      filename: `${safeName}-documents.zip`,
       page_count: null,
       document_id: null,
     });

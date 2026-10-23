@@ -11,128 +11,91 @@ interface Props {
 }
 
 /**
- * The document register. Clicking an entry jumps the preview to its first page.
+ * The document register: what the split currently proposes, in page order.
  *
- * Flags are deliberately prominent: under the brief's "a wrong answer costs
- * more than unknown" rule, the useful signal for a reviewer is not only what we
- * identified but where we were unsure, where a document duplicates another, and
- * where it may concern someone other than the client.
+ * Kept to the essentials the reviewer navigates by — the key, the pages, and
+ * whether it needs attention. The full detail of what each document is belongs
+ * in the summary PDF; crowding it in here makes the list harder to scan, and
+ * scanning is what it is for.
  */
 export function DocumentSidebar({ docs, activePage, onJump }: Props) {
-  const identified = docs.filter((d) => !d.excluded && d.doc_type).length;
   const real = docs.filter((d) => !d.excluded).length;
+  const identified = docs.filter((d) => !d.excluded && d.doc_type).length;
 
   return (
-    <div className="h-full overflow-y-auto border-r border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-      <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 px-3 py-2 backdrop-blur dark:border-slate-800 dark:bg-slate-900/95">
-        <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-          Proposed documents
+    <div className="flex h-full flex-col border-r border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+      <div className="border-b border-slate-200 px-3 py-3 dark:border-slate-800">
+        <h2 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          Documents
           <span className="ml-1.5 font-normal normal-case tracking-normal">
             ({docs.length})
           </span>
         </h2>
         {real > 0 && identified < real && (
-          <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-            Identifying… {identified} of {real} done
+          <p className="mt-1 text-[10px] text-slate-400">
+            identifying {identified}/{real}
           </p>
         )}
       </div>
 
-      <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+      <ul className="min-h-0 flex-1 overflow-y-auto">
         {docs.map((d, i) => {
           const color = colorFor(i, d.excluded);
           const isActive = activePage !== null && d.pages.includes(activePage);
-          const serious = d.review.filter((f) =>
-            SERIOUS_REVIEW_CODES.includes(f.code),
-          );
-          const minor = d.review.filter(
-            (f) => !SERIOUS_REVIEW_CODES.includes(f.code),
-          );
+          const serious = d.review.filter((f) => SERIOUS_REVIEW_CODES.includes(f.code));
+          const needsReview = serious.length > 0 || d.relates === 'no';
 
           return (
             <li key={d.doc_key}>
               <button
                 type="button"
                 onClick={() => onJump(d.pages[0])}
-                className={`flex w-full gap-2 px-3 py-2 text-left transition ${
+                className={`flex w-full items-start gap-2 px-3 py-2 text-left transition ${
                   isActive
                     ? 'bg-slate-100 dark:bg-slate-800'
                     : 'hover:bg-slate-50 dark:hover:bg-slate-800/50'
                 }`}
               >
                 <span
-                  className="mt-0.5 h-full w-1 shrink-0 self-stretch rounded-full"
-                  style={{ background: color.line }}
+                  className="mt-[3px] h-3 w-3 shrink-0 rounded-sm"
+                  style={{
+                    background: d.excluded ? 'transparent' : color.line,
+                    border: d.excluded ? `1.5px dashed ${color.line}` : undefined,
+                  }}
                   aria-hidden
                 />
 
                 <span className="min-w-0 flex-1">
-                  <span className="flex items-baseline gap-1.5">
-                    <span className="font-mono text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                  <span className="flex items-center gap-1.5">
+                    <span className="font-mono text-xs font-semibold text-slate-900 dark:text-slate-100">
                       {d.doc_key}
                     </span>
-                    <span className="truncate text-xs font-medium text-slate-900 dark:text-slate-100">
-                      {d.excluded
-                        ? 'Excluded page'
-                        : d.title || d.doc_type || 'Identifying…'}
-                    </span>
+                    {needsReview && (
+                      <span
+                        title={
+                          d.relates === 'no'
+                            ? (d.relates_reason ?? 'Appears to concern another person')
+                            : serious.map((f) => f.message).join(' · ')
+                        }
+                        className="rounded bg-amber-100 px-1 py-px text-[9px] font-medium text-amber-900 dark:bg-amber-950 dark:text-amber-300"
+                      >
+                        {d.relates === 'no'
+                          ? 'another person'
+                          : REVIEW_LABELS[serious[0].code].toLowerCase()}
+                      </span>
+                    )}
                   </span>
 
-                  {!d.excluded && (d.doc_type || d.subcategory) && (
-                    <span className="mt-1 flex flex-wrap items-center gap-1">
-                      {d.doc_type && (
-                        <span
-                          className="rounded px-1.5 py-0.5 text-[10px] font-medium"
-                          style={{ background: color.chip, color: color.chipText }}
-                        >
-                          {d.doc_type}
-                        </span>
-                      )}
-                      {d.subcategory && (
-                        <span className="text-[10px] text-slate-500 dark:text-slate-400">
-                          {d.subcategory}
-                        </span>
-                      )}
-                    </span>
-                  )}
-
-                  <span className="mt-0.5 block text-[11px] text-slate-500 dark:text-slate-400">
+                  <span className="mt-0.5 block truncate text-[11px] text-slate-500 dark:text-slate-400">
                     {d.pages.length === 1
-                      ? `Page ${d.pages[0]}`
-                      : `Pages ${summariseRuns(d.pages)}`}
-                    {d.doc_date ? ` · ${d.doc_date}` : ''}
-                    {d.org ? ` · ${d.org}` : ''}
+                      ? `page ${d.pages[0]}`
+                      : `pages ${summariseRuns(d.pages)}`}
+                    {d.excluded ? ' · excluded' : ''}
                   </span>
 
-                  {(d.dup_of ||
-                    d.relates === 'no' ||
-                    d.proposed_category ||
-                    d.review.length > 0) && (
-                    <span className="mt-1 flex flex-wrap gap-1">
-                      {d.dup_of && <Tag tone="slate">Duplicate of {d.dup_of}</Tag>}
-                      {d.relates === 'no' && (
-                        <Tag tone="red" title={d.relates_reason ?? undefined}>
-                          Another person
-                        </Tag>
-                      )}
-                      {d.proposed_category && (
-                        <Tag
-                          tone="violet"
-                          title={d.proposed_category_reason ?? undefined}
-                        >
-                          New category: {d.proposed_category}
-                        </Tag>
-                      )}
-                      {serious.map((f) => (
-                        <Tag key={f.code} tone="red" title={f.message}>
-                          {REVIEW_LABELS[f.code]}
-                        </Tag>
-                      ))}
-                      {minor.map((f) => (
-                        <Tag key={f.code} tone="amber" title={f.message}>
-                          {REVIEW_LABELS[f.code]}
-                        </Tag>
-                      ))}
+                  {!d.excluded && (d.doc_type || d.title) && (
+                    <span className="mt-0.5 block truncate text-[11px] text-slate-400 dark:text-slate-500">
+                      {d.doc_type ?? d.title}
                     </span>
                   )}
                 </span>
@@ -142,31 +105,5 @@ export function DocumentSidebar({ docs, activePage, onJump }: Props) {
         })}
       </ul>
     </div>
-  );
-}
-
-function Tag({
-  children,
-  tone,
-  title,
-}: {
-  children: React.ReactNode;
-  tone: 'slate' | 'amber' | 'red' | 'violet';
-  title?: string;
-}) {
-  const tones = {
-    slate: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
-    amber: 'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-300',
-    red: 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300',
-    violet: 'bg-violet-100 text-violet-900 dark:bg-violet-950 dark:text-violet-300',
-  } as const;
-
-  return (
-    <span
-      title={title}
-      className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${tones[tone]}`}
-    >
-      {children}
-    </span>
   );
 }
