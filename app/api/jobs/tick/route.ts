@@ -9,6 +9,7 @@ import { deriveAndStoreTaxonomy, ensureCategory, loadCategories } from '@/lib/ai
 import { fetchBundle, sliceForModel, slicePagesForModel } from '@/lib/pdf/slice';
 import { isAuthoritative, planWindows } from '@/lib/ai/windows';
 import { loadProposal, saveRevision } from '@/lib/proposal/store';
+import { groupByCategory } from '@/lib/proposal/group';
 import { summariseRuns } from '@/lib/proposal/validate';
 import type { PageSignals } from '@/lib/types';
 
@@ -28,10 +29,10 @@ import type { PageSignals } from '@/lib/types';
 
 export const maxDuration = 120;
 
-type Kind = 'classify' | 'taxonomy' | 'categorise';
+type Kind = 'classify' | 'taxonomy' | 'categorise' | 'group';
 
 /** Earlier kinds must finish before later ones can start. */
-const ORDER: Kind[] = ['classify', 'taxonomy', 'categorise'];
+const ORDER: Kind[] = ['classify', 'taxonomy', 'categorise', 'group'];
 
 interface ClaimedJob {
   id: string;
@@ -125,6 +126,8 @@ export async function POST(req: Request) {
         await runClassify(sb, sessionId, session.bundle_path, claimed);
       } else if (claimed.kind === 'taxonomy') {
         await runTaxonomy(sb, sessionId, claimed.id);
+      } else if (claimed.kind === 'group') {
+        await runGrouping(sb, sessionId, session.page_count, claimed.id);
       } else {
         await runCategorise(sb, sessionId, session.bundle_path, claimed);
       }
@@ -172,8 +175,22 @@ export async function POST(req: Request) {
     }
   }
 
+  // Every document now knows what it is, so same-category documents can be
+  // gathered. Queued as a job so it is claimed exactly once.
+  if (
+    outstanding('categorise') === 0 &&
+    jobs.some((j) => j.kind === 'categorise') &&
+    !jobs.some((j) => j.kind === 'group')
+  ) {
+    await sb.from('jobs').insert({ session_id: sessionId, kind: 'group' });
+    jobs.push({ kind: 'group', status: 'pending', window_start: null, window_end: null, result: null });
+  }
+
   const remaining =
-    outstanding('classify') + outstanding('taxonomy') + outstanding('categorise');
+    outstanding('classify') +
+    outstanding('taxonomy') +
+    outstanding('categorise') +
+    outstanding('group');
 
   if (remaining === 0 && session.status === 'processing') {
     await sb.from('sessions').update({ status: 'proposed' }).eq('id', sessionId);
@@ -347,6 +364,49 @@ async function runCategorise(
     .eq('id', doc.id);
 
   await sb.from('jobs').update({ status: 'done', result: { usage } }).eq('id', job.id);
+}
+
+async function runGrouping(
+  sb: SupabaseClient,
+  sessionId: string,
+  pageCount: number,
+  jobId: string,
+) {
+  const current = await loadProposal(sb, sessionId);
+  if (!current) throw new Error('no proposal to group');
+  const { docs, merged } = groupByCategory(current.docs);
+
+  // Idempotent by construction: once grouped, every category holds a single
+  // document, so a repeat run finds nothing to merge and changes nothing.
+  if (!merged.length) {
+    await sb.from('jobs').update({ status: 'done', result: { merged: [] } }).eq('id', jobId);
+    return;
+  }
+
+  const detail = merged
+    .map((m) => `${m.from} ${m.category.toLowerCase()} into one (${m.pages} pages)`)
+    .join('; ');
+
+  const saved = await saveRevision(sb, sessionId, docs, {
+    origin: 'ai',
+    summary: `Gathered same-category documents: ${detail}.`,
+    pageCount,
+    parentRevision: current.revision,
+  });
+
+  const kept = docs.length - merged.length;
+  await sb.from('messages').insert({
+    session_id: sessionId,
+    role: 'ai',
+    content:
+      `I gathered documents of the same kind together — ${detail}. ` +
+      `${kept} document(s) were left on their own, including anything that ` +
+      `may not be about the client. Tell me if you would rather any of them ` +
+      `stayed separate.`,
+    proposal_revision: saved.revision,
+  });
+
+  await sb.from('jobs').update({ status: 'done', result: { merged } }).eq('id', jobId);
 }
 
 type JobRow = {
