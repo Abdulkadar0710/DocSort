@@ -313,7 +313,20 @@ ${CLIENT_BRIEF}
 1. CHANGE ONLY WHAT WAS ASKED. Do not tidy up, re-title, or re-split anything
    the reviewer did not raise. Unrelated documents must come out untouched —
    this is the reviewer's main guarantee that their earlier corrections survive.
-2. Page numbers the reviewer gives are page numbers of the ORIGINAL bundle.
+2. WHICH PAGE NUMBER DID THEY MEAN? The register below gives both for every
+   document: the pages as the reviewer sees them listed, and the original
+   bundle pages behind them. Every op you emit must use ORIGINAL BUNDLE page
+   numbers.
+
+   Read the reviewer's number the way they are most likely to have meant it:
+     - "page 2 of D001", "D001's second page" → the 2nd page of that document
+     - a number within a document's shown range → position in that document
+     - a number outside every shown range, or where they say "bundle page" →
+       an original bundle page
+   Then translate to the bundle number before emitting the op, and say in your
+   explanation which actual page you moved, so a wrong reading is obvious.
+   When a number could plausibly mean either and the two differ, say so rather
+   than quietly picking one.
 3. If the request is ambiguous, do the narrowest reasonable reading and say in
    your explanation what you assumed and what you left alone.
 4. If the request cannot be expressed as operations, return an empty ops list

@@ -2,6 +2,7 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { claude, MODEL_CAREFUL, readUsage, toolResult, type Usage } from './claude';
 import { FEEDBACK_SYSTEM } from './prompts';
 import { summariseRuns } from '@/lib/proposal/validate';
+import { assignOutputPages } from '@/lib/proposal/outputPages';
 import { REVIEW_CODES, type Op, type OpsResponse, type ProposalDoc } from '@/lib/types';
 
 /**
@@ -94,11 +95,22 @@ const EDIT_TOOL: Anthropic.Tool = {
 /** The register, as compactly as it can be stated without losing anything the
  *  model needs to target an edit. ~130 documents fits in a few thousand tokens. */
 export function renderRegister(docs: ProposalDoc[]): string {
+  const output = assignOutputPages(docs);
+
   return docs
     .map((d) => {
+      const out = output.get(d.doc_key);
+      // Both numbering schemes, always. The reviewer sees output numbers in
+      // the register and bundle numbers stamped on the preview, and will say
+      // either — "page 2 of D001" usually means its second page, not bundle
+      // page 2. Giving the model the mapping lets it work out which was meant
+      // instead of guessing.
       const bits = [
         d.doc_key,
-        `pages ${summariseRuns(d.pages)}`,
+        out
+          ? `shown as page${out.from === out.to ? ` ${out.from}` : `s ${out.from}-${out.to}`}` +
+            ` = bundle page(s) ${d.pages.join(', ')}`
+          : `bundle page(s) ${summariseRuns(d.pages)}`,
         d.excluded ? 'EXCLUDED' : d.doc_type ?? 'unidentified type',
         d.title ?? 'no description',
         d.doc_date ? `dated ${d.doc_date}` : 'undated',
