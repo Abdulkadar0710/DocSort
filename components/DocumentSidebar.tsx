@@ -1,6 +1,5 @@
 'use client';
 
-import { useState } from 'react';
 import { colorFor } from '@/lib/palette';
 import { summariseRuns } from '@/lib/proposal/validate';
 import { assignOutputPages, formatOutputRange } from '@/lib/proposal/outputPages';
@@ -22,9 +21,11 @@ interface Props {
   people?: PersonSummary[];
   activePage: number | null;
   onJump: (page: number) => void;
-  /** Needed only for the "Mark same as client" action below. */
-  sessionId: string;
-  onChanged: () => Promise<unknown>;
+  /** The "Mark same as client" action, and which person (if any) it is
+   *  currently running for — owned by the parent, which blocks the whole app
+   *  while it runs rather than just this panel. */
+  mergingKey: string | null;
+  onMarkSameAsClient: (personKey: string) => void;
 }
 
 /**
@@ -35,29 +36,28 @@ interface Props {
  * in the summary PDF; crowding it in here makes the list harder to scan, and
  * scanning is what it is for.
  */
-export function DocumentSidebar({ docs, people = [], activePage, onJump, sessionId, onChanged }: Props) {
-  const [mergingKey, setMergingKey] = useState<string | null>(null);
-  const [mergeError, setMergeError] = useState('');
+export function DocumentSidebar({
+  docs,
+  people = [],
+  activePage,
+  onJump,
+  mergingKey,
+  onMarkSameAsClient,
+}: Props) {
   const hasClient = people.some((p) => p.isClient);
 
-  const markSameAsClient = async (personKey: string) => {
-    setMergingKey(personKey);
-    setMergeError('');
-    try {
-      const res = await fetch(`/api/sessions/${sessionId}/mark-same-as-client`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ person_key: personKey }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? 'could not mark these documents as the client');
-      await onChanged();
-    } catch (e) {
-      setMergeError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setMergingKey(null);
-    }
-  };
+  // Who each document actually belongs to, read from `people`'s own docKeys —
+  // not from matching d.person_key against people[i].key by string equality.
+  // Those two can drift (the client's key gains a date-of-birth suffix the
+  // moment one is added to the session, for instance, while already-grouped
+  // documents keep whatever key they were grouped under before that) even
+  // though both sides agree on who the document actually belongs to. A drifted
+  // key made a document that WAS correctly identified display as "Unidentified
+  // person" with no way to fix it, since the lookup below would silently fail.
+  const personByDocKey = new Map<string, PersonSummary>();
+  for (const p of people) {
+    for (const dk of p.docKeys) personByDocKey.set(dk, p);
+  }
 
   const real = docs.filter((d) => !d.excluded).length;
   const identified = docs.filter((d) => !d.excluded && d.doc_type).length;
@@ -89,9 +89,6 @@ export function DocumentSidebar({ docs, people = [], activePage, onJump, session
             identifying {identified}/{real}
           </p>
         )}
-        {mergeError && (
-          <p className="mt-1 text-[10px] text-red-600 dark:text-red-400">{mergeError}</p>
-        )}
       </div>
 
       <ul className="min-h-0 flex-1 overflow-y-auto">
@@ -100,12 +97,11 @@ export function DocumentSidebar({ docs, people = [], activePage, onJump, session
             important thing on the screen, because records belonging to someone
             else are a disclosure problem, not just a filing one. */}
         {docs.map((d, i) => {
-          const personKey = d.person_key ?? null;
-          const prevKey = i > 0 ? (docs[i - 1].person_key ?? null) : undefined;
+          const docPerson = personByDocKey.get(d.doc_key);
+          const personKey = docPerson?.key ?? null;
+          const prevKey = i > 0 ? (personByDocKey.get(docs[i - 1].doc_key)?.key ?? null) : undefined;
           const startsPerson = people.length > 1 && personKey !== prevKey;
-          const person = startsPerson
-            ? people.find((p) => p.key === personKey)
-            : undefined;
+          const person = startsPerson ? docPerson : undefined;
           const color = colorFor(colourIndex.get(d.doc_key) ?? i, d.excluded);
           const isActive = activePage !== null && d.pages.includes(activePage);
           // Whose document this is belongs to the person header above, not to
@@ -155,7 +151,7 @@ export function DocumentSidebar({ docs, people = [], activePage, onJump, session
                           disabled={mergingKey !== null}
                           onClick={(e) => {
                             e.stopPropagation();
-                            void markSameAsClient(person.key);
+                            onMarkSameAsClient(person.key);
                           }}
                           className="shrink-0 rounded border border-amber-300 px-1 py-px text-[9px] font-medium text-amber-800 transition hover:bg-amber-100 disabled:opacity-50 dark:border-amber-800 dark:text-amber-300 dark:hover:bg-amber-950"
                         >

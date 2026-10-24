@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { BundleViewer, type PageOrder, type ViewerPage } from '@/components/BundleViewer';
 import { DocumentSidebar, type PersonSummary } from '@/components/DocumentSidebar';
@@ -88,6 +88,14 @@ const MAX_TICK_PASSES = 200;
 /** How long the OCR pass will wait for identification to finish: 200 × 3s. */
 const OCR_WAIT_PASSES = 200;
 
+/** The Documents column's draggable width, in pixels. The default matches the
+ *  fixed width it replaced; the bounds keep it from disappearing entirely or
+ *  swallowing the preview. */
+const DOC_WIDTH_DEFAULT = 220;
+const DOC_WIDTH_MIN = 160;
+const DOC_WIDTH_MAX = 520;
+const DOC_WIDTH_STORAGE_KEY = 'unbundle:docColumnWidth';
+
 export function Workspace({ sessionId: id }: { sessionId: string }) {
   const router = useRouter();
   const [data, setData] = useState<SessionPayload | null>(null);
@@ -103,6 +111,71 @@ export function Workspace({ sessionId: id }: { sessionId: string }) {
   const [approving, setApproving] = useState(false);
   const [approveError, setApproveError] = useState('');
   const [ocrProgress, setOcrProgress] = useState<{ done: number; total: number } | null>(null);
+  const [mergingKey, setMergingKey] = useState<string | null>(null);
+  const [mergeError, setMergeError] = useState('');
+
+  // The Documents column's width, dragged via the handle beside it. Read from
+  // localStorage once the component has mounted (never during the initial
+  // render, which may run on the server, where localStorage does not exist),
+  // so a reviewer who widens it to read a long name does not have to redo
+  // that on every session they open.
+  const [docWidth, setDocWidth] = useState(DOC_WIDTH_DEFAULT);
+  const docWidthRef = useRef(docWidth);
+  const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+
+  useEffect(() => {
+    docWidthRef.current = docWidth;
+  }, [docWidth]);
+
+  useEffect(() => {
+    try {
+      const saved = Number(localStorage.getItem(DOC_WIDTH_STORAGE_KEY));
+      if (Number.isFinite(saved) && saved >= DOC_WIDTH_MIN && saved <= DOC_WIDTH_MAX) {
+        setDocWidth(saved);
+      }
+    } catch {
+      // A private window or blocked storage just means the default width.
+    }
+  }, []);
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!dragRef.current) return;
+      const next = Math.min(
+        DOC_WIDTH_MAX,
+        Math.max(DOC_WIDTH_MIN, dragRef.current.startWidth + (e.clientX - dragRef.current.startX)),
+      );
+      setDocWidth(next);
+    };
+    const onUp = () => {
+      if (!dragRef.current) return;
+      dragRef.current = null;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      try {
+        localStorage.setItem(DOC_WIDTH_STORAGE_KEY, String(docWidthRef.current));
+      } catch {
+        // Nothing to do if it cannot be saved — the width still applies for
+        // the rest of this visit.
+      }
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, []);
+
+  const startResize = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      dragRef.current = { startX: e.clientX, startWidth: docWidth };
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    },
+    [docWidth],
+  );
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/sessions/${id}`);
@@ -261,6 +334,31 @@ export function Workspace({ sessionId: id }: { sessionId: string }) {
     }
   }, [id, load]);
 
+  // Owned here, not by DocumentSidebar, specifically so the blocking overlay
+  // below can cover the whole workspace — the reviewer asked not to be able to
+  // click anything else while a merge is in flight, not just the sidebar.
+  const markSameAsClient = useCallback(
+    async (personKey: string) => {
+      setMergingKey(personKey);
+      setMergeError('');
+      try {
+        const res = await fetch(`/api/sessions/${id}/mark-same-as-client`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ person_key: personKey }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error ?? 'could not mark these documents as the client');
+        await load();
+      } catch (e) {
+        setMergeError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setMergingKey(null);
+      }
+    },
+    [id, load],
+  );
+
   if (error) {
     return (
       <main className="mx-auto max-w-2xl px-6 py-16">
@@ -375,15 +473,16 @@ export function Workspace({ sessionId: id }: { sessionId: string }) {
           )}
         </div>
 
-        {(stalled || approveError) && (
+        {(stalled || approveError || mergeError) && (
           <p className="border-t border-amber-200 bg-amber-50 px-4 py-1.5 text-xs leading-snug text-amber-900 dark:border-amber-900 dark:bg-amber-950/60 dark:text-amber-300">
-            {approveError || stalled}
+            {approveError || mergeError || stalled}
           </p>
         )}
       </header>
 
-      {/* Sessions · Documents · Preview · Refine — the four things the reviewer
-          moves between, all visible at once so none of them is a detour. */}
+      {/* Sessions · Documents · (drag handle) · Preview · Refine — the four
+          things the reviewer moves between, all visible at once so none of
+          them is a detour. */}
       {/* grid-rows-[minmax(0,1fr)] is doing real work here. Without an explicit
           row the implicit one sizes to its tallest child, so `h-full` on the
           columns resolved against content rather than the viewport: the Refine
@@ -391,7 +490,12 @@ export function Workspace({ sessionId: id }: { sessionId: string }) {
           bottom of the screen and scrolling the whole page instead of the
           message list. Pinning the row to the available height makes each
           column scroll inside itself. */}
-      <div className="grid min-h-0 flex-1 grid-cols-[clamp(130px,11vw,180px)_clamp(150px,13vw,220px)_1fr_clamp(220px,20vw,320px)] grid-rows-[minmax(0,1fr)] overflow-hidden">
+      <div
+        className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)] overflow-hidden"
+        style={{
+          gridTemplateColumns: `clamp(130px,11vw,180px) ${docWidth}px 6px 1fr clamp(220px,20vw,320px)`,
+        }}
+      >
         <SessionsRail currentId={id} />
 
         <DocumentSidebar
@@ -399,9 +503,23 @@ export function Workspace({ sessionId: id }: { sessionId: string }) {
           people={people}
           activePage={activePage}
           onJump={jump}
-          sessionId={id}
-          onChanged={load}
+          mergingKey={mergingKey}
+          onMarkSameAsClient={(personKey) => void markSameAsClient(personKey)}
         />
+
+        {/* The Documents column's own content truncates long names, which is
+            exactly what dragging this wider is for — so a reviewer can read
+            whose document that unmatched "not the client" row actually
+            belongs to, instead of guessing from a clipped label. */}
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize the documents column"
+          onMouseDown={startResize}
+          className="group relative z-10 cursor-col-resize"
+        >
+          <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-slate-200 transition group-hover:bg-blue-400 group-active:bg-blue-500 dark:bg-slate-800" />
+        </div>
 
         <div className="min-h-0 overflow-hidden">
           {bundleUrl && pages.length > 0 ? (
@@ -436,6 +554,30 @@ export function Workspace({ sessionId: id }: { sessionId: string }) {
           phases={progress.phases}
           onCancel={cancel}
         />
+      )}
+
+      {/* Blocking, deliberately, and with no cancel: a merge is one quick,
+          deterministic write (no AI call — see the mark-same-as-client
+          route), not a long process worth letting the reviewer walk away
+          from or interrupt midway through. */}
+      {mergingKey && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-busy="true"
+          aria-label="Marking documents as the client"
+          className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-sm"
+        >
+          <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-5 py-4 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+            <span
+              className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-slate-300 border-t-blue-600 dark:border-slate-600 dark:border-t-blue-400"
+              aria-hidden
+            />
+            <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
+              Merging documents into the client…
+            </p>
+          </div>
+        </div>
       )}
     </main>
   );
