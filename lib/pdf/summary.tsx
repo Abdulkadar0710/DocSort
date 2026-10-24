@@ -10,7 +10,6 @@ import {
 import { REVIEW_LABELS, type Category, type ProposalDoc } from '@/lib/types';
 import { UNIDENTIFIED, type PersonGroup } from '@/lib/proposal/people';
 import { summariseRuns, type ValidationResult } from '@/lib/proposal/validate';
-import { assignOutputPages, formatOutputRange } from '@/lib/proposal/outputPages';
 
 /**
  * The summary PDF.
@@ -34,14 +33,16 @@ const styles = StyleSheet.create({
   statN: { fontSize: 13, fontFamily: 'Helvetica-Bold' },
   statL: { fontSize: 6.5, color: '#475569', marginTop: 1 },
 
-  tHead: { flexDirection: 'row', borderBottomWidth: 1, borderColor: '#0f172a', paddingBottom: 3, marginTop: 4 },
-  tRow: { flexDirection: 'row', borderBottomWidth: 0.5, borderColor: '#e2e8f0', paddingVertical: 3 },
+  tHead: { flexDirection: 'row', borderBottomWidth: 1, borderColor: '#0f172a', backgroundColor: '#f1f5f9', paddingVertical: 3, paddingLeft: 3, marginTop: 4 },
+  tRow: { flexDirection: 'row', borderBottomWidth: 0.5, borderColor: '#cbd5e1', paddingVertical: 3, paddingLeft: 3 },
   th: { fontFamily: 'Helvetica-Bold', fontSize: 6.5 },
   td: { fontSize: 6.8, paddingRight: 3 },
 
-  cId: { width: 26 }, cOut: { width: 36 }, cPg: { width: 40 }, cTy: { width: 66 }, cSub: { width: 46 },
-  cDesc: { width: 110 }, cDt: { width: 52 }, cAu: { width: 64 }, cOrg: { width: 62 },
-  cCl: { width: 30 }, cDup: { width: 26 }, cFmt: { width: 56 }, cFlag: { flex: 1 },
+  cId: { width: 30 }, cPg: { width: 48 }, cTy: { width: 74 },
+  cDesc: { width: 128 }, cDt: { width: 56 }, cAu: { width: 92 }, cOrg: { width: 82 },
+  cCl: { width: 34 }, cDup: { width: 30 }, cFmt: { width: 62 }, cFlag: { flex: 1 },
+  italic: { fontFamily: 'Helvetica-Oblique', color: '#334155' },
+  rowFlagged: { backgroundColor: '#fef6dc' },
 
   muted: { color: '#64748b' },
   warn: { color: '#b45309' },
@@ -135,9 +136,11 @@ function Footer() {
 
 function SummaryDoc(input: SummaryInput) {
   const { docs, pageCount, validation } = input;
-  const outputPages = assignOutputPages(docs);
   const real = docs.filter((d) => !d.excluded);
   const excluded = docs.filter((d) => d.excluded);
+  // Removed at processing time: blank pages, and confirmed second copies.
+  const removedDupPages = excluded.filter((d) => d.subcategory === 'Duplicate').flatMap((d) => d.pages);
+  const blankPages = excluded.filter((d) => d.subcategory !== 'Duplicate').flatMap((d) => d.pages);
   const dups = real.filter((d) => d.dup_of);
   const otherPerson = real.filter((d) => d.relates === 'no');
   const uncertain = real.filter((d) => d.relates === 'uncertain');
@@ -159,7 +162,8 @@ function SummaryDoc(input: SummaryInput) {
 
         <View style={styles.statRow}>
           <Stat n={real.length} label="Documents identified" />
-          <Stat n={excluded.length} label="Pages excluded" />
+          <Stat n={blankPages.length} label="Blank pages removed" />
+          <Stat n={removedDupPages.length} label="Duplicate pages removed" />
           <Stat n={pageCount} label="Pages in bundle" />
           <Stat n={dups.length} label="Duplicates flagged" />
           {/* Kept apart rather than summed: "this is somebody else's record"
@@ -174,11 +178,12 @@ function SummaryDoc(input: SummaryInput) {
         </View>
 
         <Text style={styles.body}>
-          Two page numbers are given for every document. &quot;Output&quot; is
-          where it sits in the exported set, where a document&apos;s pages are
-          contiguous. &quot;Bundle pages&quot; is where those pages came from in
+          &quot;Bundle pages&quot; is where each document&apos;s pages came from in
           the original, which is often scattered — and which is the number that
-          matters if the origin of a document is ever questioned.
+          matters if the origin of a document is ever questioned. Blank pages
+          and second copies were removed during processing; they are counted
+          above and listed under &quot;Pages excluded&quot;, so every page of the
+          original is still accounted for.
         </Text>
 
         <Text style={styles.body}>
@@ -196,12 +201,13 @@ function SummaryDoc(input: SummaryInput) {
             : `PAGE ACCOUNTING PROBLEM: ${validation.errors.join('; ')}`}
         </Text>
 
-        <View style={styles.tHead}>
+        {/* Laid out as the reviewer's reference register. Blank pages and
+            removed duplicates are not documents, so they are not rows here:
+            they are counted above and listed under "Pages excluded". */}
+        <View style={styles.tHead} fixed>
           <Text style={[styles.th, styles.cId]}>ID</Text>
-          <Text style={[styles.th, styles.cOut]}>Output</Text>
           <Text style={[styles.th, styles.cPg]}>Bundle pages</Text>
-          <Text style={[styles.th, styles.cTy]}>Category</Text>
-          <Text style={[styles.th, styles.cSub]}>Subtype</Text>
+          <Text style={[styles.th, styles.cTy]}>Type</Text>
           <Text style={[styles.th, styles.cDesc]}>Description</Text>
           <Text style={[styles.th, styles.cDt]}>Date</Text>
           <Text style={[styles.th, styles.cAu]}>Author / discipline</Text>
@@ -209,26 +215,24 @@ function SummaryDoc(input: SummaryInput) {
           <Text style={[styles.th, styles.cCl]}>Client?</Text>
           <Text style={[styles.th, styles.cDup]}>Dup of</Text>
           <Text style={[styles.th, styles.cFmt]}>Format</Text>
-          <Text style={[styles.th, styles.cFlag]}>Review flags</Text>
+          <Text style={[styles.th, styles.cFlag]}>Review flags and judge notes</Text>
         </View>
 
-        {docs.map((d) => (
-          <View key={d.doc_key} style={styles.tRow} wrap={false}>
+        {real.map((d) => (
+          <View
+            key={d.doc_key}
+            style={[styles.tRow, d.review.length > 0 ? styles.rowFlagged : {}]}
+            wrap={false}
+          >
             <Text style={[styles.td, styles.cId]}>{d.doc_key}</Text>
-            <Text style={[styles.td, styles.cOut]}>
-              {d.excluded ? '—' : formatOutputRange(outputPages.get(d.doc_key)).replace(/^pages? /, '')}
-            </Text>
             <Text style={[styles.td, styles.cPg]}>{summariseRuns(d.pages)}</Text>
             <Text style={[styles.td, styles.cTy]}>{dash(d.doc_type)}</Text>
-            <Text style={[styles.td, styles.cSub]}>{dash(d.subcategory)}</Text>
-            <Text style={[styles.td, styles.cDesc]}>
-              {d.excluded ? 'Excluded — belongs to no document' : dash(d.title)}
-            </Text>
+            <Text style={[styles.td, styles.cDesc]}>{dash(d.title)}</Text>
             <Text style={[styles.td, styles.cDt]}>{dash(d.doc_date)}</Text>
-            <Text style={[styles.td, styles.cAu]}>
-              {dash(d.author)}
-              {d.discipline ? `\n${d.discipline}` : ''}
-            </Text>
+            <View style={[styles.td, styles.cAu]}>
+              <Text>{dash(d.author)}</Text>
+              {d.discipline ? <Text style={styles.italic}>{d.discipline}</Text> : null}
+            </View>
             <Text style={[styles.td, styles.cOrg]}>{dash(d.org)}</Text>
             <Text
               style={[
@@ -247,7 +251,7 @@ function SummaryDoc(input: SummaryInput) {
                 a document is NOT plainly the client's — on a confirmed match
                 it is reassurance, not a flag, and filling this column with it
                 on every row buries the entries that do need a human. */}
-            <Text style={[styles.td, styles.cFlag, styles.warn]}>
+            <Text style={[styles.td, styles.cFlag]}>
               {[
                 ...d.review.map((f) => `${REVIEW_LABELS[f.code]}: ${f.message}`),
                 d.relates !== 'yes' && d.relates_reason ? d.relates_reason : null,
