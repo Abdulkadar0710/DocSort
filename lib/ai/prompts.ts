@@ -169,7 +169,7 @@ ${clientBriefText(client)}
 
 1. overview: 2 lines — what it is, who wrote it, about whom, when.
 2. category: EXACTLY one of Letters, Receipts, Prescriptions, Reports, Notes,
-   Discharge Summaries —
+   Discharge Summaries, Insurance Claims —
    see CATEGORIES below for what belongs in each. Judge fit by what the
    document fundamentally IS, never by matching a particular word in its title
    or text: a bill is a Receipt whether it is titled "invoice", "statement" or
@@ -192,7 +192,23 @@ ${clientBriefText(client)}
    (in English or Hindi) is a Discharge Summary, even when most of the page
    is handwritten notes or an Rx list of discharge medicines. The title is
    often small and surrounded by Hindi — look for it in the printed header.
-   Only if the document genuinely fits none of those six — a consent form, a
+   Insurance Claims is the insurer's own paperwork only: claim forms, the
+   insured's declaration, consent for the insurer to obtain records, NEFT /
+   bank details for the claim payment, claim checklists, and the insurer's or
+   TPA's letters about the claim. A hospital bill, receipt, report or
+   discharge summary submitted WITH a claim is still a Receipt, Report or
+   Discharge Summary. A declaration or consent addressed to an insurance
+   company is an Insurance Claim even when the insurer's name is too faint to
+   read — report the name as best you can, or "unknown". For an Insurance
+   Claim:
+     - org = the INSURANCE COMPANY (or TPA / government scheme) the claim is
+       made to, exactly as printed — never the hospital, and never the bank
+       named on a NEFT form.
+     - subcategory = which part it is, e.g. "Claim form Part A", "Claim form
+       Part B", "NEFT form", "Declaration", "Consent / authorisation",
+       "Claim checklist", "Approval letter".
+     - desc = mention the insurer, and the policy or claim number if printed.
+   Only if the document genuinely fits none of those seven — a consent form, a
    claim form, an identification document, a witness statement, and so on —
    use "Unknown Type", and suggest a short name for what it actually is in
    proposed_category with a one-line reason. This is the only category that

@@ -1,5 +1,6 @@
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import type { OcrWord, ProposalDoc } from '@/lib/types';
+import { matchInsurer } from '@/lib/ai/insurers';
 
 /**
  * Child PDF production.
@@ -43,6 +44,17 @@ export function childFilename(
   doc: ProposalDoc,
   labelFor?: (categoryName: string | null) => string | null,
 ): string {
+  // A claim's file says who it is made to — "D007 Insurance Claim - Care
+  // Health.pdf" — because a matter can carry claims to more than one insurer
+  // and the category noun alone cannot tell them apart.
+  if (doc.doc_type === 'Insurance Claims') {
+    const insurer = matchInsurer(doc.org);
+    if (insurer) {
+      const safe = insurer.short.replace(/[^A-Za-z0-9 -]/g, '').trim();
+      return `${doc.doc_key} Insurance Claim - ${safe}.pdf`;
+    }
+  }
+
   const fallback = (doc.doc_type ?? 'Documents')
     .replace(/[^A-Za-z\s]/g, ' ')
     .split(/\s+/)

@@ -1,5 +1,6 @@
 import type { ProposalDoc, ReviewFlag } from '@/lib/types';
 import { UNIDENTIFIED } from './people';
+import { matchInsurer } from '@/lib/ai/insurers';
 
 /**
  * Group documents into one per PERSON and category.
@@ -25,7 +26,7 @@ import { UNIDENTIFIED } from './people';
  */
 
 /** Documents in these states are never merged. */
-function mergeable(d: ProposalDoc): boolean {
+function mergeable(d: ProposalDoc, soleInsurer: string | null): boolean {
   if (d.excluded) return false;
   // A confirmed duplicate of a SPECIFIC other document stays separate — that
   // relationship (dup_of names the doc_key it copies) would be meaningless
@@ -43,10 +44,44 @@ function mergeable(d: ProposalDoc): boolean {
   if (d.review.some((f) => f.code === 'multiple_patients')) {
     return false;
   }
+  // A claim is grouped by insurer, not person (see claimKey), so a claim page
+  // naming nobody still belongs with the rest of its claim.
+  if (claimKey(d, soleInsurer)) return true;
   // Nobody could be read from it: grouping these together would be asserting
   // they share a person, which is exactly what we do not know.
   if (!d.person_key || d.person_key === UNIDENTIFIED) return false;
   return !!d.doc_type;
+}
+
+/**
+ * Insurance claim paperwork groups by WHO THE CLAIM IS MADE TO.
+ *
+ * One claim's pages name different people — the policyholder on Part A and the
+ * NEFT form, the patient on Part B, nobody on the declaration — so grouping by
+ * person tore every claim into three or four pieces. The insurer is the one
+ * thing all its pages share. Claims to two different insurers stay apart.
+ */
+function claimKey(d: ProposalDoc, soleInsurer: string | null = null): string | null {
+  if (d.excluded || d.doc_type !== 'Insurance Claims') return null;
+  const insurer = matchInsurer(d.org);
+  // A faint insurer name is misread differently on each page of one claim
+  // ("Religare" read as "Belgure" or "Reliance"). When the bundle's claims
+  // name exactly one recognised insurer, an unrecognised or unreadable name
+  // is that insurer's page, not a second claim.
+  if (!insurer?.known && soleInsurer) return `claim:${soleInsurer}`;
+  return insurer ? `claim:${insurer.key}` : null;
+}
+
+/** The one recognised insurer the bundle's claims are made to, if exactly one. */
+function soleKnownInsurer(docs: ProposalDoc[]): string | null {
+  const keys = new Set(
+    docs
+      .filter((d) => !d.excluded && d.doc_type === 'Insurance Claims')
+      .map((d) => matchInsurer(d.org))
+      .filter((m) => m?.known)
+      .map((m) => m!.key),
+  );
+  return keys.size === 1 ? [...keys][0] : null;
 }
 
 const parseDate = (s: string | null): number | null => {
@@ -99,15 +134,18 @@ export function groupByCategory(
 ): GroupResult {
   const groups = new Map<string, ProposalDoc[]>();
   const standalone: ProposalDoc[] = [];
+  const rank = new Map(personOrder.map((k, i) => [k, i]));
+  const soleInsurer = soleKnownInsurer(input);
 
   for (const d of input) {
-    if (!mergeable(d)) {
+    if (!mergeable(d, soleInsurer)) {
       standalone.push(d);
       continue;
     }
     // Person FIRST, then category. Two people's prescriptions can never land
-    // in the same group, whatever else they have in common.
-    const key = `${d.person_key}\u0000${d.doc_type}`;
+    // in the same group, whatever else they have in common. Claims are the one
+    // exception: they group by insurer.
+    const key = `${claimKey(d, soleInsurer) ?? d.person_key}\u0000${d.doc_type}`;
     const list = groups.get(key);
     if (list) list.push(d);
     else groups.set(key, [d]);
@@ -125,8 +163,23 @@ export function groupByCategory(
 
     const ordered = [...docs].sort((a, b) => Math.min(...a.pages) - Math.min(...b.pages));
     const pages = ordered.flatMap((d) => d.pages).sort((a, b) => a - b);
-    const first = ordered[0];
     const span = dateSpan(ordered);
+
+    // A claim is filed under whichever person on it ranks first — the client
+    // when the client is named on any of its pages — rather than whoever
+    // happened to be on its first page (usually the policyholder).
+    const isClaim = key.startsWith('claim:');
+    const first = isClaim
+      ? [...ordered].sort(
+          (a, b) =>
+            (rank.get(a.person_key ?? UNIDENTIFIED) ?? Number.MAX_SAFE_INTEGER) -
+            (rank.get(b.person_key ?? UNIDENTIFIED) ?? Number.MAX_SAFE_INTEGER),
+        )[0]
+      : ordered[0];
+    // Named after a page whose insurer was recognised, never a misread one.
+    const insurer = isClaim
+      ? (ordered.map((d) => matchInsurer(d.org)).find((m) => m?.known) ?? matchInsurer(first.org))
+      : null;
 
     merged.push({
       person: first.person_name ?? 'unidentified',
@@ -148,18 +201,24 @@ export function groupByCategory(
       id: `new:${category}`,
       pages,
       person_name_printed: printed.length ? printed.join('; ') : null,
-      overview:
-        `${ordered.length} ${category.toLowerCase()} for ` +
-        `${first.person_name ?? 'an unidentified person'}` +
-        (span ? `, dated ${span}` : '') +
-        `. Original bundle pages ${pages.join(', ')}.`,
-      title: `${ordered.length} ${category.toLowerCase()}${span ? `, ${span}` : ''}`,
+      overview: insurer
+        ? `Insurance claim to ${insurer.name}, ${ordered.length} parts` +
+          ` (${[...new Set(ordered.map((d) => d.subcategory).filter(Boolean))].join(', ') || 'claim paperwork'})` +
+          (span ? `, dated ${span}` : '') +
+          `. Original bundle pages ${pages.join(', ')}.`
+        : `${ordered.length} ${category.toLowerCase()} for ` +
+          `${first.person_name ?? 'an unidentified person'}` +
+          (span ? `, dated ${span}` : '') +
+          `. Original bundle pages ${pages.join(', ')}.`,
+      title: insurer
+        ? `${insurer.name} — insurance claim${span ? `, ${span}` : ''}`
+        : `${ordered.length} ${category.toLowerCase()}${span ? `, ${span}` : ''}`,
       doc_date: span,
       // Only claim a single author, discipline, organisation or subtype when
       // every document in the group genuinely shares it.
       author: common(ordered.map((d) => d.author)),
       discipline: common(ordered.map((d) => d.discipline)),
-      org: common(ordered.map((d) => d.org)),
+      org: insurer ? insurer.name : common(ordered.map((d) => d.org)),
       subcategory: common(ordered.map((d) => d.subcategory)),
       relates: first.relates,
       relates_reason: first.relates_reason,
@@ -172,7 +231,6 @@ export function groupByCategory(
   // as whole people rather than interleaving three of them down the list. The
   // preview stays in bundle page order regardless — that is the original, and
   // it must not be reordered.
-  const rank = new Map(personOrder.map((k, i) => [k, i]));
   out.sort((a, b) => {
     const pa = rank.get(a.person_key ?? UNIDENTIFIED) ?? Number.MAX_SAFE_INTEGER;
     const pb = rank.get(b.person_key ?? UNIDENTIFIED) ?? Number.MAX_SAFE_INTEGER;

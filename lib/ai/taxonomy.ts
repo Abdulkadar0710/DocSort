@@ -12,9 +12,9 @@ import type { Category } from '@/lib/types';
  * keep up with. The `categories` table accumulated 85+ such near-duplicates
  * from one afternoon of testing before this was replaced.
  *
- * Seven categories, decided once, in code. If a document does not fit Letters,
- * Receipts, Prescriptions, Reports, Notes or Discharge Summaries, it is
- * Unknown Type — never a new
+ * Eight categories, decided once, in code. If a document does not fit Letters,
+ * Receipts, Prescriptions, Reports, Notes, Discharge Summaries or Insurance
+ * Claims, it is Unknown Type — never a new
  * name invented on the spot. Judging FIT is still entirely Pass C's own
  * reading of the document (categoriseSystem in prompts.ts); nothing here
  * matches on keywords.
@@ -64,11 +64,22 @@ export const FIXED_CATEGORIES: { name: string; description: string; short_label:
     short_label: 'Discharge',
   },
   {
+    name: 'Insurance Claims',
+    description:
+      "The insurer's own claim paperwork, from any insurance company, TPA or government " +
+      'scheme: claim forms (every part and section), declarations by the insured, consent ' +
+      'or authorisation for the insurer to obtain records, NEFT / bank details for the ' +
+      'claim payment, claim checklists, and letters from the insurer or TPA ' +
+      '(acknowledgement, query, approval, rejection, settlement). Bills, receipts and ' +
+      'medical records attached to a claim are NOT claims — file them by what they are.',
+    short_label: 'Insurance Claims',
+  },
+  {
     name: 'Unknown Type',
     description:
-      'Does not fit Letters, Receipts, Prescriptions, Reports, Notes or Discharge ' +
-      'Summaries — a consent form, claim form, identification document, witness ' +
-      'statement, or anything else outside those six.',
+      'Does not fit Letters, Receipts, Prescriptions, Reports, Notes, Discharge Summaries ' +
+      'or Insurance Claims — an identification document, witness statement, employment ' +
+      'record, or anything else outside those seven.',
     short_label: 'Documents',
   },
   {

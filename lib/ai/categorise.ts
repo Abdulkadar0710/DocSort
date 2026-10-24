@@ -2,6 +2,7 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { claude, MODEL_BULK, readUsage, toolResult, type Usage } from './claude';
 import { categoriseSystem, type ClientBrief } from './prompts';
 import { normaliseName } from './taxonomy';
+import { matchInsurer } from './insurers';
 import {
   cleanReview,
   orNull,
@@ -276,6 +277,12 @@ export async function categoriseDocument(opts: {
 
   const review = cleanReview(raw.review);
 
+  // A claim's org is the insurer, and one insurer is printed several ways
+  // across a claim's own pages. Store the canonical name so grouping, titles
+  // and the summary all agree on who the claim is made to.
+  const org =
+    doc_type === 'Insurance Claims' ? (matchInsurer(raw.org)?.name ?? orNull(raw.org)) : orNull(raw.org);
+
   // The brief's "a wrong answer costs more than unknown" rule, enforced rather
   // than merely requested: if the model says it is unsure who a document is
   // about, that must surface as a flag even when it forgot to raise one.
@@ -297,7 +304,7 @@ export async function categoriseDocument(opts: {
       doc_date: orNull(raw.date),
       author: orNull(raw.author),
       discipline: orNull(raw.discipline),
-      org: orNull(raw.org),
+      org,
       relates,
       relates_reason: orNull(raw.relates_reason),
       person_name: orNull(raw.person_name),
