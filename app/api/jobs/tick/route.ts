@@ -6,6 +6,7 @@ import { classifyWindow } from '@/lib/ai/passA';
 import { stitch } from '@/lib/ai/passB';
 import { categoriseDocument } from '@/lib/ai/categorise';
 import { asRemovedDuplicate, candidatePairs, confirmDuplicate } from '@/lib/ai/duplicates';
+import { exactDuplicatePages } from '@/lib/pdf/fingerprint';
 import { ensureBaseCategories, FIXED_CATEGORIES, loadCategories } from '@/lib/ai/taxonomy';
 import { fetchBundle, sliceForModel, slicePagesForModel } from '@/lib/pdf/slice';
 import { isAuthoritative, planWindows, reconcileReadings, type Reading } from '@/lib/ai/windows';
@@ -217,7 +218,7 @@ export async function POST(req: Request) {
     !jobs.some((j) => j.kind === 'taxonomy')
   ) {
     try {
-      await runStitch(sb, sessionId, session.page_count, jobs);
+      await runStitch(sb, sessionId, session.bundle_path, session.page_count, jobs);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       await sb.from('sessions').update({ status: 'failed', error: msg }).eq('id', sessionId);
@@ -636,6 +637,7 @@ type JobRow = {
 async function runStitch(
   sb: SupabaseClient,
   sessionId: string,
+  bundlePath: string,
   pageCount: number,
   jobs: JobRow[],
 ) {
@@ -686,13 +688,42 @@ async function runStitch(
     });
   }
 
+  // An exact copy of an earlier page is removed before pages are joined, so
+  // it can never be stitched into a document as a "continuation" of its own
+  // original. Treated as a non-page here, relabelled as a duplicate below.
+  const copies = await exactDuplicatePages(await fetchBundle(sb, bundlePath));
+  // An identical page can still belong to a DIFFERENT document: two monthly
+  // reports sharing the same printed back page. Keep a copy that continues
+  // the page before it unless that page is its own original or another copy.
+  for (const [page, original] of [...copies]) {
+    const s = chosen.get(page);
+    const prev = page - 1;
+    if (s?.continues_previous && !s.has_letterhead && prev !== original && !copies.has(prev)) {
+      copies.delete(page);
+    }
+  }
+  for (const [page] of copies) {
+    const s = chosen.get(page);
+    if (s) chosen.set(page, { ...s, is_blank: true, continues_previous: false, continues_confidence: 0 });
+  }
+
   const signals = [...chosen.values()].sort((a, b) => a.page_number - b.page_number);
   const { docs, decisions } = stitch(signals);
+  for (const d of docs) {
+    if (!d.excluded || !d.pages.every((p) => copies.has(p))) continue;
+    const of = [...new Set(d.pages.map((p) => copies.get(p)!))];
+    d.doc_type = 'Excluded';
+    d.subcategory = 'Duplicate';
+    d.title = `Duplicate of bundle page${of.length === 1 ? '' : 's'} ${of.join(', ')} — removed`;
+    d.overview = `An exact copy of bundle page${of.length === 1 ? '' : 's'} ${of.join(', ')}.`;
+  }
+  const blankCount = docs.filter((d) => d.excluded && d.subcategory !== 'Duplicate').length;
 
   const nonContiguous = decisions.filter((d) => !d.contiguous);
   const parts = [
     `Found ${docs.filter((d) => !d.excluded).length} documents across ${pageCount} pages`,
-    `${docs.filter((d) => d.excluded).length} page(s) excluded as blank`,
+    `${blankCount} page(s) excluded as blank`,
+    ...(copies.size ? [`${copies.size} duplicate page(s) removed`] : []),
     `${decisions.length} page(s) merged into a preceding document`,
   ];
   if (nonContiguous.length) {
