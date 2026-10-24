@@ -109,6 +109,10 @@ export function Workspace({ sessionId: id }: { sessionId: string }) {
   // answers "is this really what I was sent, with nothing missing?".
   const [pageOrder, setPageOrder] = useState<PageOrder>('output');
   const [approving, setApproving] = useState(false);
+  const [leavingForDownloads, setLeavingForDownloads] = useState(false);
+  // With Cache Components this page is hidden, not unmounted, when the
+  // Downloads page opens; clear the block so coming back finds it usable.
+  useEffect(() => () => setLeavingForDownloads(false), []);
   const [approveError, setApproveError] = useState('');
   const [ocrProgress, setOcrProgress] = useState<{ done: number; total: number } | null>(null);
   const [mergingKey, setMergingKey] = useState<string | null>(null);
@@ -327,7 +331,9 @@ export function Workspace({ sessionId: id }: { sessionId: string }) {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? 'could not produce the outputs');
       await load();
-      // Downloads are the next step, on a page of their own.
+      // Downloads are the next step, on a page of their own. Stay blocked
+      // until the navigation lands.
+      setLeavingForDownloads(true);
       router.push(`/s/${id}/download`);
     } catch (e) {
       setApproveError(e instanceof Error ? e.message : String(e));
@@ -388,9 +394,40 @@ export function Workspace({ sessionId: id }: { sessionId: string }) {
   const processing = progress.pending > 0;
   const approved = session.status === 'approved';
 
+  // Approving splits the bundle and writes every output file, which takes a
+  // while; anything the reviewer did meanwhile (an edit, another approve)
+  // would race it. Block the whole screen until it finishes, and keep it
+  // blocked while the Downloads page opens.
+  const blocking = approving || leavingForDownloads;
+
   return (
     <main className="relative flex h-dvh flex-col bg-white dark:bg-slate-900">
-      <header className="shrink-0 border-b border-slate-200 dark:border-slate-800">
+      {blocking && (
+        <div
+          role="alertdialog"
+          aria-modal="true"
+          aria-busy="true"
+          aria-label="Approving the split"
+          className="fixed inset-0 z-[100] flex cursor-wait items-center justify-center bg-white/75 backdrop-blur-[2px] dark:bg-slate-900/75"
+        >
+          <div className="flex flex-col items-center gap-3 rounded-lg border border-slate-200 bg-white px-8 py-6 shadow-xl dark:border-slate-700 dark:bg-slate-800">
+            <span
+              aria-hidden
+              className="h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-blue-600 dark:border-slate-600 dark:border-t-blue-400"
+            />
+            <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
+              Approving the split…
+            </p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Creating your documents and summary. Please wait.
+            </p>
+          </div>
+        </div>
+      )}
+      <header
+        inert={blocking}
+        className="shrink-0 border-b border-slate-200 dark:border-slate-800"
+      >
         <div className="flex items-center gap-3 px-4 py-2.5">
           <h1 className="shrink-0 truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
             {session.name}
@@ -501,6 +538,7 @@ export function Workspace({ sessionId: id }: { sessionId: string }) {
           message list. Pinning the row to the available height makes each
           column scroll inside itself. */}
       <div
+        inert={blocking}
         className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)] overflow-hidden"
         style={{
           gridTemplateColumns: `clamp(130px,11vw,180px) ${docWidth}px 6px 1fr clamp(220px,20vw,320px)`,
