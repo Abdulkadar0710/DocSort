@@ -3,7 +3,7 @@
 import { colorFor } from '@/lib/palette';
 import { summariseRuns } from '@/lib/proposal/validate';
 import { assignOutputPages, formatOutputRange } from '@/lib/proposal/outputPages';
-import { REVIEW_LABELS, SERIOUS_REVIEW_CODES, type ProposalDoc } from '@/lib/types';
+import type { ProposalDoc } from '@/lib/types';
 
 export interface PersonSummary {
   key: string;
@@ -127,14 +127,9 @@ export function DocumentSidebar({
           const person = startsPerson ? docPerson : undefined;
           const color = colorFor(colourIndex.get(d.doc_key) ?? i, d.excluded);
           const isActive = activePage !== null && d.pages.includes(activePage);
-          // Whose document this is belongs to the person header above, not to
-          // every row beneath it. A badge here says only what a reviewer must
-          // CHECK — and it says what the flag actually is, rather than
-          // restating the person. An earlier version chose the badge text from
-          // `relates`, so a document flagged "identity uncertain" displayed
-          // "another person" instead, hiding the thing it was raised for.
-          const serious = d.review.filter((f) => SERIOUS_REVIEW_CODES.includes(f.code));
-          const flag = serious[0];
+          // No review-flag badges on rows: the reviewer asked for a clean list.
+          // Flags are still recorded on the document and listed in the summary
+          // PDF's "What needs a human eye" section.
 
           return (
             <li key={d.doc_key}>
@@ -229,14 +224,6 @@ export function DocumentSidebar({
                     <span className="font-mono text-xs font-semibold text-slate-900 dark:text-slate-100">
                       {d.doc_key}
                     </span>
-                    {flag && (
-                      <span
-                        title={serious.map((f) => f.message).join(' · ')}
-                        className="rounded bg-amber-100 px-1 py-px text-[9px] font-medium text-amber-900 dark:bg-amber-950 dark:text-amber-300"
-                      >
-                        {REVIEW_LABELS[flag.code].toLowerCase()}
-                      </span>
-                    )}
                   </span>
 
                   {d.excluded ? (
