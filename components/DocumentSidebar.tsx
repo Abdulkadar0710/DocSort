@@ -59,8 +59,17 @@ export function DocumentSidebar({
     for (const dk of p.docKeys) personByDocKey.set(dk, p);
   }
 
-  const real = docs.filter((d) => !d.excluded).length;
-  const identified = docs.filter((d) => !d.excluded && d.doc_type).length;
+  // Blank pages and removed duplicates are not documents a reviewer works
+  // with, so they leave the list. They are still counted here and listed in
+  // the summary PDF, which is what keeps every page accounted for.
+  const listed = docs.filter((d) => !d.excluded);
+  const removedPages = docs.filter((d) => d.excluded);
+  const duplicates = removedPages.filter((d) => d.subcategory === 'Duplicate');
+  const blankCount = removedPages.reduce((n, d) => n + (d.subcategory === 'Duplicate' ? 0 : d.pages.length), 0);
+  const duplicateCount = duplicates.reduce((n, d) => n + d.pages.length, 0);
+
+  const real = listed.length;
+  const identified = listed.filter((d) => d.doc_type).length;
 
   // Where each document lands in the exported set. Shown alongside the bundle
   // pages, never instead of them: the output number is for navigating, the
@@ -81,12 +90,26 @@ export function DocumentSidebar({
         <h2 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
           Documents
           <span className="ml-1.5 font-normal normal-case tracking-normal">
-            ({docs.length})
+            ({listed.length})
           </span>
         </h2>
         {real > 0 && identified < real && (
           <p className="mt-1 text-[10px] text-slate-400">
             identifying {identified}/{real}
+          </p>
+        )}
+        {removedPages.length > 0 && (
+          <p
+            className="mt-1 text-[10px] text-slate-400"
+            title={removedPages.map((d) => `bundle p${summariseRuns(d.pages)}: ${d.title ?? 'blank'}`).join('\n')}
+          >
+            removed{' '}
+            {[
+              blankCount ? `${blankCount} blank page${blankCount === 1 ? '' : 's'}` : null,
+              duplicateCount ? `${duplicateCount} duplicate page${duplicateCount === 1 ? '' : 's'}` : null,
+            ]
+              .filter(Boolean)
+              .join(', ')}
           </p>
         )}
       </div>
@@ -96,10 +119,10 @@ export function DocumentSidebar({
             With a single person it would be noise; with several it is the most
             important thing on the screen, because records belonging to someone
             else are a disclosure problem, not just a filing one. */}
-        {docs.map((d, i) => {
+        {listed.map((d, i) => {
           const docPerson = personByDocKey.get(d.doc_key);
           const personKey = docPerson?.key ?? null;
-          const prevKey = i > 0 ? (personByDocKey.get(docs[i - 1].doc_key)?.key ?? null) : undefined;
+          const prevKey = i > 0 ? (personByDocKey.get(listed[i - 1].doc_key)?.key ?? null) : undefined;
           const startsPerson = people.length > 1 && personKey !== prevKey;
           const person = startsPerson ? docPerson : undefined;
           const color = colorFor(colourIndex.get(d.doc_key) ?? i, d.excluded);

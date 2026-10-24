@@ -339,7 +339,9 @@ export function BundleViewer({
                   // visibly belonging somewhere or being deliberately set aside.
                   <div className="flex h-full w-full items-center justify-center">
                     <span className="text-[11px] font-medium text-slate-400">
-                      Blank page · excluded
+                      {entry?.doc.subcategory === 'Duplicate'
+                        ? `${entry.doc.title ?? 'Duplicate — removed'}`
+                        : 'Blank page · removed'}
                     </span>
                   </div>
                 ) : (

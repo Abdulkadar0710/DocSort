@@ -5,6 +5,7 @@ import { hasApiKey } from '@/lib/ai/claude';
 import { classifyWindow } from '@/lib/ai/passA';
 import { stitch } from '@/lib/ai/passB';
 import { categoriseDocument } from '@/lib/ai/categorise';
+import { asRemovedDuplicate, candidatePairs, confirmDuplicate } from '@/lib/ai/duplicates';
 import { ensureBaseCategories, FIXED_CATEGORIES, loadCategories } from '@/lib/ai/taxonomy';
 import { fetchBundle, sliceForModel, slicePagesForModel } from '@/lib/pdf/slice';
 import { isAuthoritative, planWindows } from '@/lib/ai/windows';
@@ -144,7 +145,7 @@ export async function POST(req: Request) {
       } else if (claimed.kind === 'taxonomy') {
         await runTaxonomy(sb, sessionId, claimed.id);
       } else if (claimed.kind === 'group') {
-        await runGrouping(sb, sessionId, session.page_count, claimed.id, {
+        await runGrouping(sb, sessionId, session.bundle_path, session.page_count, claimed.id, {
           name: session.client_name,
           dob: session.client_dob,
         });
@@ -432,6 +433,7 @@ async function runCategorise(
 async function runGrouping(
   sb: SupabaseClient,
   sessionId: string,
+  bundlePath: string,
   pageCount: number,
   jobId: string,
   client: { name: string | null; dob: string | null },
@@ -509,6 +511,31 @@ async function runGrouping(
     return { ...d, relates, review };
   });
 
+  // Remove the same record scanned in twice, before grouping can fold the copy
+  // into its category's file. Settled per pair by looking at both documents.
+  const removed: { copy: number[]; of: number[] }[] = [];
+  const pairs = candidatePairs(withPeople);
+  if (pairs.length) {
+    const bundle = await fetchBundle(sb, bundlePath);
+    for (const { original, copy } of pairs) {
+      const at = withPeople.findIndex((d) => d.doc_key === copy.doc_key);
+      const orig = withPeople.find((d) => d.doc_key === original.doc_key);
+      // Already removed as a copy of something else, or its original was.
+      if (withPeople[at].excluded || orig?.excluded) continue;
+
+      const { base64 } = await slicePagesForModel(bundle, [...original.pages, ...copy.pages]);
+      const verdict = await confirmDuplicate({
+        pdfBase64: base64,
+        aPages: original.pages,
+        bPages: copy.pages,
+      });
+      if (!verdict.same) continue;
+
+      withPeople[at] = { ...asRemovedDuplicate(withPeople[at], original, verdict.reason), relates: 'n/a' };
+      removed.push({ copy: copy.pages, of: original.pages });
+    }
+  }
+
   const { docs, merged } = groupByCategory(
     withPeople,
     clustered.people.map((p) => p.key),
@@ -516,7 +543,7 @@ async function runGrouping(
 
   // Idempotent by construction: once grouped, every category holds a single
   // document, so a repeat run finds nothing to merge and changes nothing.
-  if (!merged.length) {
+  if (!merged.length && !removed.length) {
     await sb.from('jobs').update({ status: 'done', result: { merged: [] } }).eq('id', jobId);
     return;
   }
@@ -534,9 +561,17 @@ async function runGrouping(
           .join('; ') + '. '
       : '';
 
+  const removedLine = removed.length
+    ? `Removed ${removed.length} duplicate(s): ` +
+      removed.map((r) => `page ${r.copy.join(', ')} (copy of page ${r.of.join(', ')})`).join('; ') +
+      '. '
+    : '';
+
   const saved = await saveRevision(sb, sessionId, docs, {
     origin: 'ai',
-    summary: `${peopleLine}Gathered same-category documents: ${detail}.`,
+    summary:
+      `${peopleLine}${removedLine}` +
+      (merged.length ? `Gathered same-category documents: ${detail}.` : ''),
     pageCount,
     parentRevision: current.revision,
   });
@@ -556,7 +591,16 @@ async function runGrouping(
             .join(', ') +
           `. I have kept them completely separate. `
         : '') +
-      `I gathered documents of the same kind together — ${detail}. ` +
+      (removed.length
+        ? `I removed ${removed.length} duplicate(s) — ` +
+          removed
+            .map((r) => `page ${r.copy.join(', ')} is a second copy of page ${r.of.join(', ')}`)
+            .join('; ') +
+          `. They are left out of the output but still listed in the summary. `
+        : '') +
+      (merged.length
+        ? `I gathered documents of the same kind together — ${detail}. `
+        : '') +
       `${kept} document(s) were left on their own. ` +
       `Tell me if you would rather any of them stayed separate.`,
     proposal_revision: saved.revision,
