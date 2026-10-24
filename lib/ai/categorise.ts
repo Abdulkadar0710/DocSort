@@ -309,6 +309,9 @@ export async function categoriseDocument(opts: {
       person_age: orNull(raw.person_age),
       person_patient_id: orNull(raw.person_patient_id),
       person_address: orNull(raw.person_address),
+      // Never set by Pass C — only a reviewer's explicit "mark same as
+      // client" action sets this, after the document already exists.
+      person_client_confirmed: false,
       // Assigned by clustering once every document has been read, so that
       // spelling variants of one person collapse rather than each becoming
       // their own group.

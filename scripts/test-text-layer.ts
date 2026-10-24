@@ -29,6 +29,7 @@ function doc(key: string, pages: number[], extra: Partial<ProposalDoc> = {}): Pr
     author: null, discipline: null, org: null, relates: 'yes', relates_reason: null,
     person_name: null, person_name_printed: null, person_dob: null,
     person_gender: null, person_age: null, person_patient_id: null, person_address: null,
+    person_client_confirmed: false,
     person_key: null, dup_of: null,
     review: [], confidence: null, excluded: false, ...extra,
   };

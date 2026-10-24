@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { colorFor } from '@/lib/palette';
 import { summariseRuns } from '@/lib/proposal/validate';
 import { assignOutputPages, formatOutputRange } from '@/lib/proposal/outputPages';
@@ -21,6 +22,9 @@ interface Props {
   people?: PersonSummary[];
   activePage: number | null;
   onJump: (page: number) => void;
+  /** Needed only for the "Mark same as client" action below. */
+  sessionId: string;
+  onChanged: () => Promise<unknown>;
 }
 
 /**
@@ -31,7 +35,30 @@ interface Props {
  * in the summary PDF; crowding it in here makes the list harder to scan, and
  * scanning is what it is for.
  */
-export function DocumentSidebar({ docs, people = [], activePage, onJump }: Props) {
+export function DocumentSidebar({ docs, people = [], activePage, onJump, sessionId, onChanged }: Props) {
+  const [mergingKey, setMergingKey] = useState<string | null>(null);
+  const [mergeError, setMergeError] = useState('');
+  const hasClient = people.some((p) => p.isClient);
+
+  const markSameAsClient = async (personKey: string) => {
+    setMergingKey(personKey);
+    setMergeError('');
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/mark-same-as-client`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ person_key: personKey }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? 'could not mark these documents as the client');
+      await onChanged();
+    } catch (e) {
+      setMergeError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setMergingKey(null);
+    }
+  };
+
   const real = docs.filter((d) => !d.excluded).length;
   const identified = docs.filter((d) => !d.excluded && d.doc_type).length;
 
@@ -61,6 +88,9 @@ export function DocumentSidebar({ docs, people = [], activePage, onJump }: Props
           <p className="mt-1 text-[10px] text-slate-400">
             identifying {identified}/{real}
           </p>
+        )}
+        {mergeError && (
+          <p className="mt-1 text-[10px] text-red-600 dark:text-red-400">{mergeError}</p>
         )}
       </div>
 
@@ -111,9 +141,28 @@ export function DocumentSidebar({ docs, people = [], activePage, onJump }: Props
                       the client
                     </span>
                   ) : (
-                    <span className="shrink-0 text-[9px] font-medium text-amber-700 dark:text-amber-400">
-                      not the client
-                    </span>
+                    <>
+                      <span className="shrink-0 text-[9px] font-medium text-amber-700 dark:text-amber-400">
+                        not the client
+                      </span>
+                      {/* The reviewer's override for a mismatch automatic
+                          name-matching cannot resolve. Only offered when a
+                          client is actually named — with nothing to merge
+                          into, the action would have nowhere to go. */}
+                      {hasClient && person && (
+                        <button
+                          type="button"
+                          disabled={mergingKey !== null}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void markSameAsClient(person.key);
+                          }}
+                          className="shrink-0 rounded border border-amber-300 px-1 py-px text-[9px] font-medium text-amber-800 transition hover:bg-amber-100 disabled:opacity-50 dark:border-amber-800 dark:text-amber-300 dark:hover:bg-amber-950"
+                        >
+                          {mergingKey === person.key ? 'Merging…' : 'Mark same as client'}
+                        </button>
+                      )}
+                    </>
                   )}
                   <span className="ml-auto shrink-0 text-[9px] text-slate-500">
                     {person?.pages.length ?? 0}p

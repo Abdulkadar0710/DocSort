@@ -122,6 +122,10 @@ export interface DocMeta {
   person_age: string | null;
   person_patient_id: string | null;
   person_address: string | null;
+  /** A reviewer has manually confirmed this document IS the client, overriding
+   *  whatever automatic name matching would otherwise decide. Permanent: every
+   *  future clustering pass keeps honouring it. See clusterPeople. */
+  person_client_confirmed: boolean;
   /** Normalised identity used to group by person; set by clustering. */
   person_key: string | null;
   /** doc_key of the document this duplicates. */

@@ -38,6 +38,7 @@ function blankMeta(): DocMeta {
     person_age: null,
     person_patient_id: null,
     person_address: null,
+    person_client_confirmed: false,
     person_key: null,
     dup_of: null,
     review: [],

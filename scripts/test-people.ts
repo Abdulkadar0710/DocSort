@@ -372,6 +372,53 @@ check(
   ) === MATCH_NEAR,
 );
 
+// --------------------------------------------- the "mark same as client" override
+//
+// clusterPeople recomputes every group from scratch on every call — it never
+// trusts a document's existing person_key — so a reviewer's correction has to
+// be a signal clusterPeople itself keeps honouring, not a one-time field
+// overwrite. person_client_confirmed is that signal.
+{
+  const confirmedDoc = {
+    doc_key: 'D001',
+    pages: [1],
+    person_name: 'XYZ Totally Unreadable Garble',
+    person_name_printed: 'XYZ Totally Unreadable Garble',
+    person_dob: null,
+    person_client_confirmed: true,
+  };
+  const siblingDoc = {
+    doc_key: 'D002',
+    pages: [2],
+    person_name: 'XYZ Totally Unreadable Garble',
+    person_name_printed: 'XYZ Totally Unreadable Garble',
+    person_dob: null,
+    person_client_confirmed: false,
+  };
+
+  const result = clusterPeople([confirmedDoc, siblingDoc], { name: 'Gauri Solanki', dob: null });
+  const clientGroup = result.people.find((p) => p.isClient)!;
+  const confirmed = result.docs.find((d) => d.doc_key === 'D001')!;
+  const sibling = result.docs.find((d) => d.doc_key === 'D002')!;
+
+  check(
+    'a confirmed document lands with the client however unreadable its name is',
+    confirmed.person_key === clientGroup.key,
+    confirmed.person_key,
+  );
+  check('a confirmed match is never flagged', confirmed.identity_tier === MATCH_EXACT, String(confirmed.identity_tier));
+  check(
+    'an unconfirmed sibling with the SAME unreadable name is left alone',
+    sibling.person_key !== clientGroup.key,
+    sibling.person_key,
+  );
+  check(
+    "the confirmed document's printed spelling still shows as a variant",
+    clientGroup.variants.includes('XYZ Totally Unreadable Garble'),
+    clientGroup.variants.join('; '),
+  );
+}
+
 console.log(`\n${pass} passed, ${fails.length} failed`);
 if (fails.length) {
   for (const f of fails) console.log(`  ✗ ${f}`);

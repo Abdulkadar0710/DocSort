@@ -454,6 +454,9 @@ export interface PersonDoc {
    *  year for documents that print an age instead of a date of birth. */
   person_age?: string | null;
   doc_date?: string | null;
+  /** A reviewer has manually confirmed this document IS the client — see the
+   *  check at the top of clusterPeople's per-document loop. */
+  person_client_confirmed?: boolean;
 }
 
 export interface ClusterResult<T extends PersonDoc> {
@@ -516,6 +519,27 @@ export function clusterPeople<T extends PersonDoc>(
       .split(';')
       .map((x) => x.trim())
       .filter(Boolean);
+
+    // A reviewer has manually confirmed this specific document IS the
+    // client — skip matching entirely, even when the printed name is
+    // unreadable or reads as nothing like the client at all. Checked before
+    // the "no readable name" exit below, since that is exactly the kind of
+    // document this override exists for.
+    if (doc.person_client_confirmed) {
+      const clientGroup = groups.find((g) => g.isClient);
+      if (clientGroup) {
+        for (const spelling of spellings) {
+          if (nameTokens(spelling).join(' ') === nameTokens(clientGroup.name).join(' ')) continue;
+          if (!clientGroup.variants.includes(spelling)) clientGroup.variants.push(spelling);
+        }
+        clientGroup.docKeys.push(doc.doc_key);
+        clientGroup.pages.push(...doc.pages);
+        assigned.set(doc.doc_key, clientGroup.key);
+        tiers.set(doc.doc_key, MATCH_EXACT); // confirmed by a reviewer — nothing to flag
+        continue;
+      }
+    }
+
     const printed = spellings[0] ?? null;
     const gender = normaliseGender(doc.person_gender);
     const patientId = doc.person_patient_id?.trim() || null;

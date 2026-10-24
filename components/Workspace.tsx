@@ -399,6 +399,8 @@ export function Workspace({ sessionId: id }: { sessionId: string }) {
           people={people}
           activePage={activePage}
           onJump={jump}
+          sessionId={id}
+          onChanged={load}
         />
 
         <div className="min-h-0 overflow-hidden">
