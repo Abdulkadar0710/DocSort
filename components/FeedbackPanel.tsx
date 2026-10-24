@@ -1,7 +1,26 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import type { ProposalDiff } from '@/lib/proposal/diff';
+
+/**
+ * Starter instructions for the changes a reviewer makes most (move, reorder,
+ * merge, exclude, relabel, undo). Clicking one fills
+ * the box for the reviewer to adjust and send.
+ *
+ * Pages are named "bundle pN" on purpose: a bare "page 24 of D001" was read as
+ * D001's 4th page rather than original page 24, while "bundle p24" — the label
+ * printed under every page in the preview — was understood every time.
+ */
+const CHAT_EXAMPLES: { text: string; what: string }[] = [
+  { text: 'Move bundle p19 from D001 to D002', what: 'Move a page into another document' },
+  { text: 'In D004 move bundle p5 after bundle p9', what: 'Change the page order inside a document' },
+  { text: 'Merge D005 into D004', what: 'Join two documents into one' },
+  { text: 'Bundle p32 is blank, exclude it', what: 'Remove a blank or unwanted page' },
+  { text: 'D002 is a Prescription, not Notes', what: 'Correct the category' },
+  { text: 'Revert the last change', what: 'Undo the last change or step' },
+];
 
 interface Props {
   sessionId: string;
@@ -41,6 +60,8 @@ export function FeedbackPanel({
   onJump,
 }: Props) {
   const [text, setText] = useState('');
+  const [showExamples, setShowExamples] = useState(false);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [diff, setDiff] = useState<ProposalDiff | null>(null);
@@ -90,9 +111,11 @@ export function FeedbackPanel({
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-3">
         {data.messages.length === 0 && !processing && (
           <p className="rounded-md bg-slate-50 p-2.5 text-[11px] leading-relaxed text-slate-600 dark:bg-slate-800/50 dark:text-slate-400">
-            Describe a change in plain language — for example{' '}
-            <em>&ldquo;D001 should end at page 2&rdquo;</em> or{' '}
-            <em>&ldquo;page 3 is blank, exclude it&rdquo;</em>.
+            Describe a change in plain language. Refer to pages by the{' '}
+            <em>bundle p</em> number printed under each page, and to documents by
+            their D number — for example{' '}
+            <em>&ldquo;Move bundle p19 from D001 to D002&rdquo;</em>. Click{' '}
+            <em>Examples</em> below for more.
           </p>
         )}
 
@@ -147,7 +170,14 @@ export function FeedbackPanel({
           </div>
         )}
 
-        {approved && <Downloads sessionId={sessionId} outputs={data.outputs} />}
+        {approved && (
+          <Link
+            href={`/s/${sessionId}/download`}
+            className="block rounded-md border border-green-300 px-2.5 py-2 text-center text-[11px] font-medium text-green-800 transition hover:bg-green-50 dark:border-green-800 dark:text-green-300 dark:hover:bg-green-950/40"
+          >
+            Split approved — go to downloads →
+          </Link>
+        )}
 
         <div ref={endRef} />
       </div>
@@ -160,8 +190,38 @@ export function FeedbackPanel({
             </p>
           )}
 
+          <button
+            type="button"
+            onClick={() => setShowExamples((v) => !v)}
+            className="mb-1.5 text-[10px] font-medium text-blue-700 hover:underline dark:text-blue-300"
+          >
+            {showExamples ? 'Hide examples' : 'Examples'}
+          </button>
+          {showExamples && (
+            <ul className="mb-2 space-y-1">
+              {CHAT_EXAMPLES.map((ex) => (
+                <li key={ex.text}>
+                  <button
+                    type="button"
+                    disabled={!canAct}
+                    onClick={() => {
+                      setText(ex.text);
+                      inputRef.current?.focus();
+                    }}
+                    title={ex.what}
+                    className="w-full rounded border border-slate-200 px-2 py-1 text-left text-[10px] text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                  >
+                    {ex.text}
+                    <span className="block text-[9px] text-slate-400">{ex.what}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
           <div className="rounded-md border border-slate-300 focus-within:border-slate-900 dark:border-slate-700 dark:focus-within:border-slate-100">
             <textarea
+              ref={inputRef}
               value={text}
               onChange={(e) => setText(e.target.value)}
               onKeyDown={(e) => {
@@ -191,56 +251,3 @@ export function FeedbackPanel({
   );
 }
 
-function Downloads({
-  sessionId,
-  outputs,
-}: {
-  sessionId: string;
-  outputs: { id: string; kind: string; filename: string; page_count: number | null }[];
-}) {
-  const summary = outputs.find((o) => o.kind === 'summary');
-  const zip = outputs.find((o) => o.kind === 'zip');
-  const children = outputs.filter((o) => o.kind === 'child');
-
-  return (
-    <div className="rounded-md border border-green-300 bg-green-50 p-2.5 dark:border-green-800 dark:bg-green-950/40">
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-green-900 dark:text-green-300">
-        Approved — {children.length} documents
-      </p>
-
-      <ul className="mt-2 space-y-1">
-        {children.map((c) => (
-          <li key={c.id}>
-            <a
-              href={`/api/download/${sessionId}/${c.id}`}
-              className="flex items-center justify-between gap-2 rounded px-1.5 py-1 text-[11px] text-green-900 hover:bg-green-100 dark:text-green-200 dark:hover:bg-green-900/40"
-            >
-              <span className="truncate">{c.filename}</span>
-              <span aria-hidden>↓</span>
-            </a>
-          </li>
-        ))}
-        {summary && (
-          <li>
-            <a
-              href={`/api/download/${sessionId}/${summary.id}`}
-              className="flex items-center justify-between gap-2 rounded px-1.5 py-1 text-[11px] font-semibold text-green-900 hover:bg-green-100 dark:text-green-200 dark:hover:bg-green-900/40"
-            >
-              <span className="truncate">{summary.filename}</span>
-              <span aria-hidden>↓</span>
-            </a>
-          </li>
-        )}
-      </ul>
-
-      {zip && (
-        <a
-          href={`/api/download/${sessionId}/${zip.id}`}
-          className="mt-2 block rounded bg-blue-600 px-2.5 py-1.5 text-center text-[11px] font-medium text-white hover:bg-blue-700"
-        >
-          Download all
-        </a>
-      )}
-    </div>
-  );
-}

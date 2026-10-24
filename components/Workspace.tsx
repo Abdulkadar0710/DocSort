@@ -327,12 +327,14 @@ export function Workspace({ sessionId: id }: { sessionId: string }) {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? 'could not produce the outputs');
       await load();
+      // Downloads are the next step, on a page of their own.
+      router.push(`/s/${id}/download`);
     } catch (e) {
       setApproveError(e instanceof Error ? e.message : String(e));
     } finally {
       setApproving(false);
     }
-  }, [id, load]);
+  }, [id, load, router]);
 
   // Owned here, not by DocumentSidebar, specifically so the blocking overlay
   // below can cover the whole workspace — the reviewer asked not to be able to
@@ -470,6 +472,14 @@ export function Workspace({ sessionId: id }: { sessionId: string }) {
             >
               {approving ? 'Splitting…' : 'Approve split'}
             </button>
+          )}
+          {approved && (
+            <Link
+              href={`/s/${id}/download`}
+              className="shrink-0 rounded-md bg-green-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-green-700"
+            >
+              Go to downloads
+            </Link>
           )}
         </div>
 
