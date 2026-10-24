@@ -1,5 +1,5 @@
 import type Anthropic from '@anthropic-ai/sdk';
-import { claude, MODEL_BULK, readUsage, toolResult, type Usage } from './claude';
+import { claude, MODEL_JUDGE, readUsage, toolResult, type Usage } from './claude';
 import { categoriseSystem, type ClientBrief } from './prompts';
 import { normaliseName } from './taxonomy';
 import { matchInsurer } from './insurers';
@@ -206,9 +206,18 @@ export async function categoriseDocument(opts: {
     .filter(Boolean)
     .join(' ');
 
-  const res = await claude().messages.create({
-    model: MODEL_BULK,
-    max_tokens: 2000,
+  const res = await claude().beta.messages.create({
+    model: MODEL_JUDGE,
+    // Opus 5.5 always thinks before answering, and thinking counts against
+    // max_tokens — the old 2000 would cut the answer off mid-tool-call.
+    max_tokens: 16000,
+    // Thinking can't be disabled on this model; effort is the control. Its
+    // default is medium, set explicitly so a model change can't move it.
+    output_config: { effort: 'medium' },
+    // Medical records can trip a safety classifier. On a decline the API
+    // re-runs the request on a fallback model instead of returning nothing.
+    betas: ['server-side-fallback-2026-07-01'],
+    fallbacks: 'default',
     system: [
       {
         type: 'text',
@@ -221,7 +230,9 @@ export async function categoriseDocument(opts: {
       },
     ],
     tools: [CATEGORISE_TOOL],
-    tool_choice: { type: 'tool', name: 'categorise_document' },
+    // Forcing a named tool is rejected on Opus 5.5; ask for it instead (see
+    // the closing line of the user message) and fail loudly if it is skipped.
+    tool_choice: { type: 'auto' },
     messages: [
       {
         role: 'user',
@@ -237,14 +248,18 @@ export async function categoriseDocument(opts: {
               `${pageNumbers.join(', ')} — ${pageNumbers.length} page` +
               `${pageNumbers.length === 1 ? '' : 's'}, attached in reading order.` +
               (notes ? `\n\n${notes}` : '') +
-              `\n\n${textBlock}`,
+              `\n\n${textBlock}` +
+              `\n\nReport your answer by calling categorise_document exactly once.`,
           },
         ],
       },
     ],
   });
 
-  const raw = toolResult<RawCategorise>(res.content, 'categorise_document');
+  if (res.stop_reason === 'refusal') {
+    throw new Error(`categorise declined for ${docKey} (${res.stop_details?.category ?? 'no category'})`);
+  }
+  const raw = toolResult<RawCategorise>(res.content as Anthropic.ContentBlock[], 'categorise_document');
 
   // Hold the model to the fixed taxonomy: anything outside it becomes
   // "Unknown Type" with the offered name recorded as a proposal, rather than

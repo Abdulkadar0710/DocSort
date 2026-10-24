@@ -11,6 +11,10 @@ import Anthropic from '@anthropic-ai/sdk';
  */
 export const MODEL_BULK = 'claude-haiku-4-5-20251001';
 export const MODEL_CAREFUL = 'claude-sonnet-5';
+/** Judges each document's category and identity (Pass C). Scanned, handwritten
+ *  and part-Hindi pages were misjudged often enough on MODEL_BULK that the
+ *  reviewer chose the strongest model here, at roughly 4x the per-token price. */
+export const MODEL_JUDGE = 'claude-opus-5-5';
 
 let client: Anthropic | null = null;
 
