@@ -21,10 +21,10 @@ const cat = (name: string) => ({ name });
 // The taxonomy is exactly these seven, nothing more.
 {
   const names = FIXED_CATEGORIES.map((c) => c.name);
-  check('there are exactly 9 fixed categories (8 + Excluded)', names.length === 9, names.join(', '));
+  check('there are exactly 10 fixed categories (9 + Excluded)', names.length === 10, names.join(', '));
   check(
-    'the eight reviewer-facing categories are all present',
-    ['Letters', 'Receipts', 'Prescriptions', 'Reports', 'Notes', 'Discharge Summaries', 'Insurance Claims', 'Unknown Type'].every((n) =>
+    'the nine reviewer-facing categories are all present',
+    ['Letters', 'Billing & Invoices', 'Medical Records', 'Diagnostic Reports', 'Notes', 'Discharge Summaries', 'Insurance Claims', 'Certificates', 'Needs Review'].every((n) =>
       names.includes(n),
     ),
     names.join(', '),
@@ -79,7 +79,7 @@ const cat = (name: string) => ({ name });
 // A spelling/casing variant of a fixed category is NOT stale — the same
 // normaliseName-based identity check ensureCategory already used.
 {
-  const stale = staleCategoryNames([cat('letters'), cat('RECEIPTS'), cat('Prescription')]);
+  const stale = staleCategoryNames([cat('letters'), cat('BILLING & INVOICES'), cat('Medical Record')]);
   check(
     'a case or pluralisation variant of a fixed name is not treated as stale',
     stale.length === 0,

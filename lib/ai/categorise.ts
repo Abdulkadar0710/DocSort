@@ -1,7 +1,7 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { claude, MODEL_JUDGE, readUsage, toolResult, type Usage } from './claude';
 import { categoriseSystem, type ClientBrief } from './prompts';
-import { normaliseName } from './taxonomy';
+import { currentCategoryName, NEEDS_REVIEW, normaliseName } from './taxonomy';
 import { matchInsurer } from './insurers';
 import {
   cleanReview,
@@ -64,7 +64,7 @@ const CATEGORISE_TOOL: Anthropic.Tool = {
       category: { type: 'string', description: 'Exactly one of the CATEGORIES names.' },
       proposed_category: {
         type: 'string',
-        description: 'Only when category is "Unknown Type": a short name for what it actually is.',
+        description: 'Only when category is "Needs Review": a short name for what it actually is.',
       },
       proposed_category_reason: {
         type: 'string',
@@ -262,14 +262,14 @@ export async function categoriseDocument(opts: {
   const raw = toolResult<RawCategorise>(res.content as Anthropic.ContentBlock[], 'categorise_document');
 
   // Hold the model to the fixed taxonomy: anything outside it becomes
-  // "Unknown Type" with the offered name recorded as a proposal, rather than
+  // "Needs Review" with the offered name recorded as a proposal, rather than
   // silently inventing a category that no other document will ever be filed
-  // under.
+  // under. A pre-rename name ("Reports") is read as its current one.
   const names = new Map(categories.map((c) => [normaliseName(c.name), c.name]));
-  const offered = orNull(raw.category);
+  const offered = currentCategoryName(orNull(raw.category));
   const matched = offered ? names.get(normaliseName(offered)) : null;
 
-  let doc_type = matched ?? 'Unknown Type';
+  let doc_type = matched ?? NEEDS_REVIEW;
   let proposed = orNull(raw.proposed_category);
   let proposedReason = orNull(raw.proposed_category_reason);
 

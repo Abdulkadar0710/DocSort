@@ -12,9 +12,30 @@ import type { Category } from '@/lib/types';
  * keep up with. The `categories` table accumulated 85+ such near-duplicates
  * from one afternoon of testing before this was replaced.
  *
- * Eight categories, decided once, in code. If a document does not fit Letters,
- * Receipts, Prescriptions, Reports, Notes, Discharge Summaries or Insurance
- * Claims, it is Unknown Type — never a new
+ * Category names shown to reviewers were renamed (Reports → Diagnostic
+ * Reports, Receipts → Billing & Invoices, Prescriptions → Medical Records,
+ * Unknown Type → Needs Review). Sessions processed before that still have the
+ * old names stored, so they are translated wherever a session is loaded.
+ */
+export const RENAMED_CATEGORIES: Record<string, string> = {
+  Reports: 'Diagnostic Reports',
+  Receipts: 'Billing & Invoices',
+  Prescriptions: 'Medical Records',
+  'Unknown Type': 'Needs Review',
+};
+
+/** The catch-all for anything that fits no other category. */
+export const NEEDS_REVIEW = 'Needs Review';
+
+/** A stored category name in its current form. */
+export function currentCategoryName<T extends string | null>(name: T): T {
+  return (name && RENAMED_CATEGORIES[name] ? RENAMED_CATEGORIES[name] : name) as T;
+}
+
+/**
+ * Nine categories, decided once, in code. If a document does not fit Letters,
+ * Billing & Invoices, Medical Records, Diagnostic Reports, Notes, Discharge
+ * Summaries, Insurance Claims or Certificates, it is Needs Review — never a new
  * name invented on the spot. Judging FIT is still entirely Pass C's own
  * reading of the document (categoriseSystem in prompts.ts); nothing here
  * matches on keywords.
@@ -27,33 +48,33 @@ export const FIXED_CATEGORIES: { name: string; description: string; short_label:
     short_label: 'Letters',
   },
   {
-    name: 'Receipts',
+    name: 'Billing & Invoices',
     description:
       'Any bill, invoice, receipt or payment acknowledgement for an expense, whatever the expense was for and whoever issued it.',
-    short_label: 'Receipts',
+    short_label: 'Billing & Invoices',
   },
   {
-    name: 'Prescriptions',
+    name: 'Medical Records',
     description:
       'Any prescription or medication order — including a consultation written on a ' +
       "doctor's prescription pad (printed letterhead with name, qualifications, " +
       'registration number) that lists medicines to take (an Rx section, "Tab"/"Cap"/' +
       '"Syp" with doses), even when the same page also records complaints, vitals, ' +
       'examination findings or advice.',
-    short_label: 'Prescriptions',
+    short_label: 'Medical Records',
   },
   {
-    name: 'Reports',
+    name: 'Diagnostic Reports',
     description:
       'Any pathology, laboratory, imaging, investigation or other diagnostic report, from any department or provider — ' +
       'including ECG / EKG tracings and rhythm strips, X-ray, MRI, CT and ultrasound images or films, and their reports.',
-    short_label: 'Reports',
+    short_label: 'Diagnostic Reports',
   },
   {
     name: 'Notes',
     description:
       'Any clinical, consultation, progress or handwritten note that does not prescribe ' +
-      'medicines. A consultation that ends in a list of medicines to take is a Prescription.',
+      'medicines. A consultation that ends in a list of medicines to take is Medical Records.',
     short_label: 'Notes',
   },
   {
@@ -72,16 +93,25 @@ export const FIXED_CATEGORIES: { name: string; description: string; short_label:
       'or authorisation for the insurer to obtain records, NEFT / bank details for the ' +
       'claim payment, claim checklists, and letters from the insurer or TPA ' +
       '(acknowledgement, query, approval, rejection, settlement). Bills, receipts and ' +
-      'medical records attached to a claim are NOT claims — file them by what they are.',
+      'clinical documents attached to a claim are NOT claims — file them by what they are.',
     short_label: 'Insurance Claims',
   },
   {
-    name: 'Unknown Type',
+    name: 'Certificates',
     description:
-      'Does not fit Letters, Receipts, Prescriptions, Reports, Notes, Discharge Summaries ' +
-      'or Insurance Claims — an identification document, witness statement, employment ' +
-      'record, or anything else outside those seven.',
-    short_label: 'Documents',
+      'Any certificate issued by a doctor, hospital or authority: medical, sick-leave or ' +
+      'unfit-for-work certificates, fitness certificates, work capacity certificates, ' +
+      'disability, vaccination, birth and death certificates. A discharge certificate is ' +
+      'a Discharge Summary.',
+    short_label: 'Certificates',
+  },
+  {
+    name: NEEDS_REVIEW,
+    description:
+      'Does not fit Letters, Billing & Invoices, Medical Records, Diagnostic Reports, Notes, ' +
+      'Discharge Summaries, Insurance Claims or Certificates — an identification document, ' +
+      'witness statement, employment record, or anything else outside those eight.',
+    short_label: 'Needs Review',
   },
   {
     name: 'Excluded',

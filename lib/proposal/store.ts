@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Proposal, ProposalDoc, ReviewFlag } from '@/lib/types';
 import { cleanReview } from '@/lib/types';
 import { validateProposal } from './validate';
+import { currentCategoryName } from '@/lib/ai/taxonomy';
 
 /**
  * Proposal persistence.
@@ -53,7 +54,8 @@ function rowToDoc(r: DocRow): ProposalDoc {
     id: r.id,
     doc_key: r.doc_key,
     title: r.title,
-    doc_type: r.doc_type,
+    // Sessions processed before the category rename stored the old names.
+    doc_type: currentCategoryName(r.doc_type),
     doc_date: r.doc_date,
     author: r.author,
     discipline: r.discipline,

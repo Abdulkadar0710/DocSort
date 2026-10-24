@@ -67,7 +67,10 @@ export function childFilename(
     ? word[0].toUpperCase() + word.slice(1)
     : 'Documents';
 
-  return `${doc.doc_key} ${/s$/i.test(label) ? label : `${label}s`}.pdf`;
+  // Pluralise a one-word noun ("Letter" → "Letters"); a phrase such as
+  // "Needs Review" or "Medical Records" is used exactly as labelled.
+  const plural = /s$/i.test(label) || label.includes(' ') ? label : `${label}s`;
+  return `${doc.doc_key} ${plural}.pdf`;
 }
 
 /**

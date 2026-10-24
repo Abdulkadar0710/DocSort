@@ -168,28 +168,31 @@ ${clientBriefText(client)}
 ## STEPS
 
 1. overview: 2 lines — what it is, who wrote it, about whom, when.
-2. category: EXACTLY one of Letters, Receipts, Prescriptions, Reports, Notes,
-   Discharge Summaries, Insurance Claims —
+2. category: EXACTLY one of Letters, Billing & Invoices, Medical Records,
+   Diagnostic Reports, Notes, Discharge Summaries, Insurance Claims,
+   Certificates —
    see CATEGORIES below for what belongs in each. Judge fit by what the
    document fundamentally IS, never by matching a particular word in its title
-   or text: a bill is a Receipt whether it is titled "invoice", "statement" or
-   "billing summary"; a diagnostic test result is a Report whichever
-   department issued it; a referral is a Letter whether or not the page says
-   "letter" anywhere on it.
-   Prescriptions vs Notes: a doctor's consultation that prescribes medicines
-   is a Prescription. In many places, notably India, the standard prescription
+   or text: a bill is Billing & Invoices whether it is titled "invoice",
+   "receipt", "statement" or "billing summary"; a diagnostic test result is a
+   Diagnostic Report whichever department issued it; a referral is a Letter
+   whether or not the page says "letter" anywhere on it.
+   Medical Records vs Notes: a doctor's consultation that prescribes medicines
+   is Medical Records. In many places, notably India, the standard prescription
    is the doctor's printed pad carrying the complaint, vitals, findings and
    advice above an Rx list of medicines — handwritten, often partly in Hindi.
-   That whole page is a Prescription, not Notes. The pad itself is the
+   That whole page is Medical Records, not Notes. The pad itself is the
    signal: a page written on a doctor's printed prescription pad (letterhead
-   with the doctor's name, qualifications and registration number) is a
-   Prescription even when the handwriting is too poor to read the medicines.
+   with the doctor's name, qualifications and registration number) is Medical
+   Records even when the handwriting is too poor to read the medicines.
    Handwritten lines starting "Tab", "Cap", "Syp" or "Inj", or an Rx / ℞
    mark, are medicines however hard they are to read. Use Notes only for
    notes that are clearly not on a prescription pad and prescribe nothing.
+   A medical, sick-leave, fitness, unfit-for-work or work capacity
+   certificate is a Certificate, even when issued on a prescription pad.
    An ECG / EKG tracing or rhythm strip, and any X-ray, MRI, CT or
-   ultrasound image or film, is a Report — never a Prescription or Notes,
-   even with handwriting on it. If the attached pages are plainly two
+   ultrasound image or film, is a Diagnostic Report — never Medical Records
+   or Notes, even with handwriting on it. If the attached pages are plainly two
    different documents (for example an ECG tracing followed by a
    prescription pad), file it by what the FIRST page is and add a review
    flag "incomplete" saying the pages look like two separate documents.
@@ -202,8 +205,8 @@ ${clientBriefText(client)}
    insured's declaration, consent for the insurer to obtain records, NEFT /
    bank details for the claim payment, claim checklists, and the insurer's or
    TPA's letters about the claim. A hospital bill, receipt, report or
-   discharge summary submitted WITH a claim is still a Receipt, Report or
-   Discharge Summary. A declaration or consent addressed to an insurance
+   discharge summary submitted WITH a claim is still Billing & Invoices, a
+   Diagnostic Report or a Discharge Summary. A declaration or consent addressed to an insurance
    company is an Insurance Claim even when the insurer's name is too faint to
    read — report the name as best you can, or "unknown". For an Insurance
    Claim:
@@ -214,11 +217,11 @@ ${clientBriefText(client)}
        Part B", "NEFT form", "Declaration", "Consent / authorisation",
        "Claim checklist", "Approval letter".
      - desc = mention the insurer, and the policy or claim number if printed.
-   Only if the document genuinely fits none of those seven — a consent form, a
-   claim form, an identification document, a witness statement, and so on —
-   use "Unknown Type", and suggest a short name for what it actually is in
+   Only if the document genuinely fits none of those eight — an
+   identification document, a witness statement, and so on — use
+   "Needs Review", and suggest a short name for what it actually is in
    proposed_category with a one-line reason. This is the only category that
-   exists purely as a catch-all; do not reach for it when one of the five
+   exists purely as a catch-all; do not reach for it when one of the others
    fits, even loosely.
 3. subcategory: short specific type (e.g. MRI, payslip, discharge instructions).
 4. desc: plain English, max 15 words. Mention if it is a copy, fax or draft.
