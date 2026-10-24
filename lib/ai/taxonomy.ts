@@ -12,8 +12,9 @@ import type { Category } from '@/lib/types';
  * keep up with. The `categories` table accumulated 85+ such near-duplicates
  * from one afternoon of testing before this was replaced.
  *
- * Six categories, decided once, in code. If a document does not fit Letters,
- * Receipts, Prescriptions, Reports or Notes, it is Unknown Type — never a new
+ * Seven categories, decided once, in code. If a document does not fit Letters,
+ * Receipts, Prescriptions, Reports, Notes or Discharge Summaries, it is
+ * Unknown Type — never a new
  * name invented on the spot. Judging FIT is still entirely Pass C's own
  * reading of the document (categoriseSystem in prompts.ts); nothing here
  * matches on keywords.
@@ -33,7 +34,12 @@ export const FIXED_CATEGORIES: { name: string; description: string; short_label:
   },
   {
     name: 'Prescriptions',
-    description: 'Any prescription or medication order.',
+    description:
+      'Any prescription or medication order — including a consultation written on a ' +
+      "doctor's prescription pad (printed letterhead with name, qualifications, " +
+      'registration number) that lists medicines to take (an Rx section, "Tab"/"Cap"/' +
+      '"Syp" with doses), even when the same page also records complaints, vitals, ' +
+      'examination findings or advice.',
     short_label: 'Prescriptions',
   },
   {
@@ -44,15 +50,25 @@ export const FIXED_CATEGORIES: { name: string; description: string; short_label:
   },
   {
     name: 'Notes',
-    description: 'Any clinical, consultation, progress or handwritten note.',
+    description:
+      'Any clinical, consultation, progress or handwritten note that does not prescribe ' +
+      'medicines. A consultation that ends in a list of medicines to take is a Prescription.',
     short_label: 'Notes',
+  },
+  {
+    name: 'Discharge Summaries',
+    description:
+      'Any hospital discharge card, discharge summary or discharge certificate — a form ' +
+      'or letter issued when a patient leaves hospital, whatever handwritten notes or ' +
+      'medicines are written on it.',
+    short_label: 'Discharge',
   },
   {
     name: 'Unknown Type',
     description:
-      'Does not fit Letters, Receipts, Prescriptions, Reports or Notes — a consent form, ' +
-      'claim form, identification document, witness statement, or anything else outside ' +
-      'those five.',
+      'Does not fit Letters, Receipts, Prescriptions, Reports, Notes or Discharge ' +
+      'Summaries — a consent form, claim form, identification document, witness ' +
+      'statement, or anything else outside those six.',
     short_label: 'Documents',
   },
   {

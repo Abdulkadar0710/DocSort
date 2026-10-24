@@ -21,10 +21,10 @@ const cat = (name: string) => ({ name });
 // The taxonomy is exactly these seven, nothing more.
 {
   const names = FIXED_CATEGORIES.map((c) => c.name);
-  check('there are exactly 7 fixed categories (6 + Excluded)', names.length === 7, names.join(', '));
+  check('there are exactly 8 fixed categories (7 + Excluded)', names.length === 8, names.join(', '));
   check(
-    'the six reviewer-facing categories are all present',
-    ['Letters', 'Receipts', 'Prescriptions', 'Reports', 'Notes', 'Unknown Type'].every((n) =>
+    'the seven reviewer-facing categories are all present',
+    ['Letters', 'Receipts', 'Prescriptions', 'Reports', 'Notes', 'Discharge Summaries', 'Unknown Type'].every((n) =>
       names.includes(n),
     ),
     names.join(', '),

@@ -168,14 +168,31 @@ ${clientBriefText(client)}
 ## STEPS
 
 1. overview: 2 lines — what it is, who wrote it, about whom, when.
-2. category: EXACTLY one of Letters, Receipts, Prescriptions, Reports, Notes —
+2. category: EXACTLY one of Letters, Receipts, Prescriptions, Reports, Notes,
+   Discharge Summaries —
    see CATEGORIES below for what belongs in each. Judge fit by what the
    document fundamentally IS, never by matching a particular word in its title
    or text: a bill is a Receipt whether it is titled "invoice", "statement" or
    "billing summary"; a diagnostic test result is a Report whichever
    department issued it; a referral is a Letter whether or not the page says
    "letter" anywhere on it.
-   Only if the document genuinely fits none of those five — a consent form, a
+   Prescriptions vs Notes: a doctor's consultation that prescribes medicines
+   is a Prescription. In many places, notably India, the standard prescription
+   is the doctor's printed pad carrying the complaint, vitals, findings and
+   advice above an Rx list of medicines — handwritten, often partly in Hindi.
+   That whole page is a Prescription, not Notes. The pad itself is the
+   signal: a page written on a doctor's printed prescription pad (letterhead
+   with the doctor's name, qualifications and registration number) is a
+   Prescription even when the handwriting is too poor to read the medicines.
+   Handwritten lines starting "Tab", "Cap", "Syp" or "Inj", or an Rx / ℞
+   mark, are medicines however hard they are to read. Use Notes only for
+   notes that are clearly not on a prescription pad and prescribe nothing.
+   A printed form title says what the form IS: a pre-printed hospital form
+   titled "Discharge Card", "Discharge Summary" or "Discharge Certificate"
+   (in English or Hindi) is a Discharge Summary, even when most of the page
+   is handwritten notes or an Rx list of discharge medicines. The title is
+   often small and surrounded by Hindi — look for it in the printed header.
+   Only if the document genuinely fits none of those six — a consent form, a
    claim form, an identification document, a witness statement, and so on —
    use "Unknown Type", and suggest a short name for what it actually is in
    proposed_category with a one-line reason. This is the only category that
