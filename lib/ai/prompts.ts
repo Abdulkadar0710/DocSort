@@ -187,6 +187,12 @@ ${clientBriefText(client)}
    Handwritten lines starting "Tab", "Cap", "Syp" or "Inj", or an Rx / ℞
    mark, are medicines however hard they are to read. Use Notes only for
    notes that are clearly not on a prescription pad and prescribe nothing.
+   An ECG / EKG tracing or rhythm strip, and any X-ray, MRI, CT or
+   ultrasound image or film, is a Report — never a Prescription or Notes,
+   even with handwriting on it. If the attached pages are plainly two
+   different documents (for example an ECG tracing followed by a
+   prescription pad), file it by what the FIRST page is and add a review
+   flag "incomplete" saying the pages look like two separate documents.
    A printed form title says what the form IS: a pre-printed hospital form
    titled "Discharge Card", "Discharge Summary" or "Discharge Certificate"
    (in English or Hindi) is a Discharge Summary, even when most of the page

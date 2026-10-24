@@ -45,7 +45,8 @@ export const FIXED_CATEGORIES: { name: string; description: string; short_label:
   {
     name: 'Reports',
     description:
-      'Any pathology, laboratory, imaging, investigation or other diagnostic report, from any department or provider.',
+      'Any pathology, laboratory, imaging, investigation or other diagnostic report, from any department or provider — ' +
+      'including ECG / EKG tracings and rhythm strips, X-ray, MRI, CT and ultrasound images or films, and their reports.',
     short_label: 'Reports',
   },
   {
