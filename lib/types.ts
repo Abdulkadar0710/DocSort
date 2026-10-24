@@ -115,6 +115,13 @@ export interface DocMeta {
    *  against a name we have already overwritten. */
   person_name_printed: string | null;
   person_dob: string | null;
+  /** Other identifying clues for the same subject, each as printed — only
+   *  ever set from something explicitly on the page, never inferred. Used
+   *  alongside the name and DOB to cluster people; see lib/proposal/people.ts. */
+  person_gender: string | null;
+  person_age: string | null;
+  person_patient_id: string | null;
+  person_address: string | null;
   /** Normalised identity used to group by person; set by clustering. */
   person_key: string | null;
   /** doc_key of the document this duplicates. */

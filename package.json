@@ -13,13 +13,14 @@
     "ingest": "tsx scripts/ingest.ts",
     "score": "tsx scripts/score.ts",
     "test:polyfill": "tsx scripts/test-polyfill.ts",
-    "test": "npm run test:ops && npm run test:polyfill && npm run test:stitch && npm run test:group && npm run test:people && npm run test:output",
+    "test": "npm run test:ops && npm run test:polyfill && npm run test:stitch && npm run test:group && npm run test:people && npm run test:output && npm run test:taxonomy",
     "test:stitch": "tsx scripts/test-stitch.ts",
     "make:dummy": "tsx scripts/make-dummy-bundle.ts",
     "make:slice": "tsx scripts/make-test-slice.ts",
     "test:group": "tsx scripts/test-group.ts",
     "test:people": "tsx scripts/test-people.ts",
-    "test:output": "tsx scripts/test-output-pages.ts"
+    "test:output": "tsx scripts/test-output-pages.ts",
+    "test:taxonomy": "tsx scripts/test-taxonomy.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.1.0",

@@ -27,7 +27,9 @@ function doc(key: string, pages: number[], extra: Partial<ProposalDoc> = {}): Pr
     overview: null, title: `${key} title`, doc_type: 'Reports', subcategory: null,
     proposed_category: null, proposed_category_reason: null, doc_date: null,
     author: null, discipline: null, org: null, relates: 'yes', relates_reason: null,
-    person_name: null, person_name_printed: null, person_dob: null, person_key: null, dup_of: null,
+    person_name: null, person_name_printed: null, person_dob: null,
+    person_gender: null, person_age: null, person_patient_id: null, person_address: null,
+    person_key: null, dup_of: null,
     review: [], confidence: null, excluded: false, ...extra,
   };
 }

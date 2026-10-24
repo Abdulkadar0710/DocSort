@@ -135,44 +135,6 @@ ${CLIENT_BRIEF}
 Report on every page you are given, in order, and on no others.
 `.trim();
 
-/**
- * Pass C0 — derive the category set.
- *
- * Run once, after documents are assembled, with a one-line gist of every
- * document in the bundle. Deriving the taxonomy in a single call with the whole
- * bundle in view is what keeps it coherent: categorising documents one at a
- * time against an open-ended vocabulary produces three spellings of the same
- * category by the end of a long bundle.
- */
-export const TAXONOMY_SYSTEM = `
-You are designing the category list for a document register.
-
-You will be shown a one-line description of every document found in one
-medico-legal bundle. Propose the set of categories that best organises THIS
-bundle, for an occupational therapist who needs to find things in it later.
-
-## What makes a good set
-
-- Stay within the number of categories you are asked for. Too few and the
-  register stops being useful; too many and it becomes a list of individual
-  documents rather than a way to find them.
-- Each category should hold several documents. If only one document would ever
-  fall in a category, it belongs inside a broader one.
-- Never create two categories one of which could contain the other. "Allied
-  Health Reports" and "Physiotherapy Reports" cannot both exist: pick the level
-  that suits how many documents there actually are.
-- Names should be what a clinician would say: short noun phrases, title case,
-  no jargon invented for the occasion.
-- Categories must not overlap. A document should have one obvious home.
-- Distinguish by WHAT A DOCUMENT IS, never by who it is about, how legible it
-  is, or whether it is a duplicate. Those are recorded separately.
-- Always include a category named exactly "Excluded" for blank or contentless
-  pages, and one named exactly "Other" for documents fitting nothing else.
-
-Give each category a one-line description saying what belongs in it, written so
-someone else could sort documents the same way you would.
-`.trim();
-
 /** Render the active taxonomy for a prompt. */
 export function renderCategories(categories: Category[]): string {
   if (!categories.length) return '(none defined yet)';
@@ -206,9 +168,19 @@ ${clientBriefText(client)}
 ## STEPS
 
 1. overview: 2 lines — what it is, who wrote it, about whom, when.
-2. category: pick from CATEGORIES below, using the overview.
-   If none fits (medical or non-medical), use "Other" and suggest a short new
-   name in proposed_category with a one-line reason.
+2. category: EXACTLY one of Letters, Receipts, Prescriptions, Reports, Notes —
+   see CATEGORIES below for what belongs in each. Judge fit by what the
+   document fundamentally IS, never by matching a particular word in its title
+   or text: a bill is a Receipt whether it is titled "invoice", "statement" or
+   "billing summary"; a diagnostic test result is a Report whichever
+   department issued it; a referral is a Letter whether or not the page says
+   "letter" anywhere on it.
+   Only if the document genuinely fits none of those five — a consent form, a
+   claim form, an identification document, a witness statement, and so on —
+   use "Unknown Type", and suggest a short name for what it actually is in
+   proposed_category with a one-line reason. This is the only category that
+   exists purely as a catch-all; do not reach for it when one of the five
+   fits, even loosely.
 3. subcategory: short specific type (e.g. MRI, payslip, discharge instructions).
 4. desc: plain English, max 15 words. Mention if it is a copy, fax or draft.
 5. date: date written or issued, DD/MM/YYYY.
@@ -231,7 +203,20 @@ ${clientBriefText(client)}
    subject with the shared surname, here "Gouri Solanki", and mention the
    relative in relates_reason. Folding the whole phrase into person_name files
    the record under the wrong person.
-8. relates — compare that person with the CLIENT BRIEF:
+8. person_gender / person_age / person_patient_id / person_address — other
+   identifiers for the SAME subject as person_name, each "unknown" if not
+   printed:
+     person_gender     "male" or "female", ONLY from an explicit printed field
+                        ("Sex: F", "Gender: Male") or an explicit title (Mr,
+                        Mrs, Miss, Smt, Shri). Never guess it from the given
+                        name itself — a name alone is not "printed".
+     person_age         as printed, e.g. "45". Not a date of birth converted
+                        to an age — only an age actually written on the page.
+     person_patient_id  the subject's OWN registration/UHID/patient number.
+                        Not a bill, receipt, invoice or lab sample number —
+                        those identify a transaction or specimen, not a person.
+     person_address      as printed.
+9. relates — compare that person with the CLIENT BRIEF:
      yes       = about the client (older records still count)
      no        = a different person, even with the same surname, address or
                  employer
@@ -239,7 +224,7 @@ ${clientBriefText(client)}
    Give relates_reason naming the identifiers you actually compared
    (for example "name and DOB match", or "surname matches but first name is
    Kylie and no DOB given").
-9. review: flags a human must check, each {code, message} with a one-line
+10. review: flags a human must check, each {code, message} with a one-line
    message. code is one of:
      missing_pages, incomplete, illegible, rotated, no_author, no_date,
      relates_uncertain, multiple_patients, possible_copy, low_confidence
@@ -253,7 +238,7 @@ ${clientBriefText(client)}
    multiple_patients, however clearly that person is not the client: say so
    in relates and relates_reason, which is what they are for. Do not raise a
    flag to repeat what those fields already say.
-10. confidence: 0 to 1.
+11. confidence: 0 to 1.
 
 ## NOTES
 
@@ -316,6 +301,7 @@ ${CLIENT_BRIEF}
 - {"op":"set_meta","doc":"D012","fields":{"title":"…","doc_type":"…",
    "subcategory":"…","doc_date":"…","author":"…","discipline":"…","org":"…",
    "relates":"no","relates_reason":"…","dup_of":"D053",
+   "person_gender":"…","person_age":"…","person_patient_id":"…","person_address":"…",
    "review":[{"code":"possible_copy","message":"…"}]}}
     Correct what a document IS, without moving any pages.
 

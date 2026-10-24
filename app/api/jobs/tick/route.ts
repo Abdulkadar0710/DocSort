@@ -5,7 +5,7 @@ import { hasApiKey } from '@/lib/ai/claude';
 import { classifyWindow } from '@/lib/ai/passA';
 import { stitch } from '@/lib/ai/passB';
 import { categoriseDocument } from '@/lib/ai/categorise';
-import { deriveAndStoreTaxonomy, ensureCategory, loadCategories } from '@/lib/ai/taxonomy';
+import { ensureBaseCategories, FIXED_CATEGORIES, loadCategories } from '@/lib/ai/taxonomy';
 import { fetchBundle, sliceForModel, slicePagesForModel } from '@/lib/pdf/slice';
 import { isAuthoritative, planWindows } from '@/lib/ai/windows';
 import { loadProposal, saveRevision } from '@/lib/proposal/store';
@@ -298,13 +298,13 @@ async function runTaxonomy(sb: SupabaseClient, sessionId: string, jobId: string)
   const proposal = await loadProposal(sb, sessionId);
   if (!proposal) throw new Error('no proposal to derive a taxonomy from');
 
-  const { categories, usage } = await deriveAndStoreTaxonomy(
-    sb,
-    sessionId,
-    proposal.docs,
-  );
+  // No AI call: the category set is fixed in code (FIXED_CATEGORIES). This
+  // just makes sure the `categories` table matches it exactly — including
+  // deactivating anything an earlier, now-removed per-bundle taxonomy call
+  // ever invented, so it can never again be offered to Pass C below.
+  await ensureBaseCategories(sb);
 
-  // Now that a taxonomy exists, queue one categorise job per real document.
+  // Now that the taxonomy exists, queue one categorise job per real document.
   // Excluded pages need no categorising: they are already accounted for.
   const targets = proposal.docs.filter((d) => !d.excluded);
   if (targets.length) {
@@ -324,7 +324,7 @@ async function runTaxonomy(sb: SupabaseClient, sessionId: string, jobId: string)
     .from('jobs')
     .update({
       status: 'done',
-      result: { categories: categories.map((c) => c.name), usage },
+      result: { categories: FIXED_CATEGORIES.map((c) => c.name) },
     })
     .eq('id', jobId);
 }
@@ -378,18 +378,12 @@ async function runCategorise(
     client,
   });
 
-  // A genuinely new category joins the taxonomy so later documents can use it
-  // too, rather than every one of them proposing the same thing separately.
-  if (meta.proposed_category && meta.proposed_category_reason) {
-    await ensureCategory(sb, {
-      name: meta.proposed_category,
-      description: meta.proposed_category_reason,
-      origin: 'proposed',
-      reason: meta.proposed_category_reason,
-      sessionId,
-      sortOrder: 500,
-    });
-  }
+  // No promotion step: doc_type is always already one of FIXED_CATEGORIES
+  // (categoriseDocument falls back to "Unknown Type" otherwise — see
+  // lib/ai/categorise.ts). proposed_category/proposed_category_reason are
+  // still saved below, purely as information for a reviewer deciding how to
+  // relabel an Unknown Type document by hand; nothing turns them into a new
+  // live category any more.
 
   // Metadata fills into the existing revision rather than creating a new one.
   // The grouping has not changed — only what we know about each document — and
@@ -417,6 +411,16 @@ async function runCategorise(
       // who share a surname and an address.
       person_name: meta.person_name,
       person_dob: meta.person_dob,
+      // Other identity clues Pass C read off the page — gender, age, patient
+      // ID, address — used alongside name and DOB when clustering people
+      // (lib/proposal/people.ts). Computed by categoriseDocument since the
+      // "Flexible patient-name identification" work, but never actually
+      // persisted here until now, so clusterPeople never saw real values for
+      // them regardless of what Pass C extracted.
+      person_gender: meta.person_gender,
+      person_age: meta.person_age,
+      person_patient_id: meta.person_patient_id,
+      person_address: meta.person_address,
       review: meta.review,
       confidence: meta.confidence,
     })

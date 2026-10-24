@@ -27,6 +27,10 @@ interface DocRow {
   person_name: string | null;
   person_name_printed: string | null;
   person_dob: string | null;
+  person_gender: string | null;
+  person_age: string | null;
+  person_patient_id: string | null;
+  person_address: string | null;
   person_key: string | null;
   dup_of: string | null;
   review: ReviewFlag[] | null;
@@ -58,6 +62,10 @@ function rowToDoc(r: DocRow): ProposalDoc {
     person_name: r.person_name,
     person_name_printed: r.person_name_printed ?? r.person_name,
     person_dob: r.person_dob,
+    person_gender: r.person_gender,
+    person_age: r.person_age,
+    person_patient_id: r.person_patient_id,
+    person_address: r.person_address,
     person_key: r.person_key,
     dup_of: r.dup_of,
     review: cleanReview(r.review),
@@ -74,7 +82,8 @@ function rowToDoc(r: DocRow): ProposalDoc {
 
 const DOC_SELECT = `
   id, doc_key, title, doc_type, doc_date, author, discipline, org,
-  relates, relates_reason, person_name, person_name_printed, person_dob, person_key,
+  relates, relates_reason, person_name, person_name_printed, person_dob,
+  person_gender, person_age, person_patient_id, person_address, person_key,
   dup_of, review, confidence, excluded, sort_order,
   overview, subcategory, proposed_category, proposed_category_reason,
   document_pages ( page_number, position )
@@ -183,6 +192,10 @@ export async function saveRevision(
         person_name: d.person_name,
         person_name_printed: d.person_name_printed,
         person_dob: d.person_dob,
+        person_gender: d.person_gender,
+        person_age: d.person_age,
+        person_patient_id: d.person_patient_id,
+        person_address: d.person_address,
         person_key: d.person_key,
         dup_of: d.dup_of,
         review: d.review,

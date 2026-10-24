@@ -27,10 +27,20 @@ import { UNIDENTIFIED } from './people';
 /** Documents in these states are never merged. */
 function mergeable(d: ProposalDoc): boolean {
   if (d.excluded) return false;
-  // A suspected copy stays separate so the reviewer can compare it against
-  // whatever it copies.
+  // A confirmed duplicate of a SPECIFIC other document stays separate — that
+  // relationship (dup_of names the doc_key it copies) would be meaningless
+  // once both sides are folded into one combined document.
   if (d.dup_of) return false;
-  if (d.review.some((f) => f.code === 'possible_copy' || f.code === 'multiple_patients')) {
+  // A document naming several different patients at once is never merged —
+  // that is a statement about the document's own content, not about who it
+  // belongs to, and merging it would assert a single person's file contains
+  // somebody else's records too.
+  //
+  // possible_copy (a SUSPECTED, not confirmed, copy) is NOT excluded here: the
+  // reviewer asked for it to merge like any other document of its category,
+  // with the flag carried onto the merged document (mergeReview, below) so it
+  // is still visible there rather than silently dropped.
+  if (d.review.some((f) => f.code === 'multiple_patients')) {
     return false;
   }
   // Nobody could be read from it: grouping these together would be asserting

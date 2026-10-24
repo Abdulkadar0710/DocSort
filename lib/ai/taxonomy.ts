@@ -1,71 +1,66 @@
-import type Anthropic from '@anthropic-ai/sdk';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { claude, MODEL_CAREFUL, readUsage, toolResult, type Usage } from './claude';
-import { TAXONOMY_SYSTEM } from './prompts';
-import type { Category, ProposalDoc } from '@/lib/types';
+import type { Category } from '@/lib/types';
 
 /**
- * Pass C0 — derive the category set.
+ * The category set.
  *
- * Nothing is hardcoded. The taxonomy is produced once per bundle, from a
- * one-line description of every document in it, and stored in the `categories`
- * table for every later pass to use.
+ * Fixed, not derived. An earlier version asked an LLM to design a taxonomy
+ * fresh for every bundle, which guarantees drift by construction: there is
+ * always another wording a previous fix has not seen — "Hospital Bills"
+ * becomes "Hospital Billing" becomes "Diagnostic Centre Receipts", each one a
+ * new, unique-looking category that folding-after-the-fact can never fully
+ * keep up with. The `categories` table accumulated 85+ such near-duplicates
+ * from one afternoon of testing before this was replaced.
  *
- * Doing it in a single call with the whole bundle in view is the point. The
- * obvious alternative — let each document invent its own category when nothing
- * fits — is order-dependent and drifts: by the end of a long bundle you have
- * "Physio report", "Physiotherapy notes" and "Allied health" all meaning the
- * same thing, and a register that cannot be sorted. Sonnet rather than Haiku
- * because this one call shapes how every other document is filed.
+ * Six categories, decided once, in code. If a document does not fit Letters,
+ * Receipts, Prescriptions, Reports or Notes, it is Unknown Type — never a new
+ * name invented on the spot. Judging FIT is still entirely Pass C's own
+ * reading of the document (categoriseSystem in prompts.ts); nothing here
+ * matches on keywords.
  */
-
-/**
- * How many categories a bundle of this size should have.
- *
- * A fixed floor is wrong: asked for at least eight categories to organise four
- * documents, the model dutifully invented overlapping ones — "Allied Health
- * Reports" alongside "Physiotherapy Reports" — which is exactly the incoherence
- * the taxonomy pass exists to prevent. The range has to follow the bundle.
- */
-export function categoryBudget(docCount: number): { min: number; max: number } {
-  const min = Math.max(3, Math.min(8, Math.ceil(docCount / 3)));
-  const max = Math.max(min + 1, Math.min(18, Math.ceil(docCount / 2)));
-  return { min, max };
-}
-
-const taxonomyTool = (min: number, max: number): Anthropic.Tool => ({
-  name: 'propose_categories',
-  description: 'Propose the category set for this bundle.',
-  input_schema: {
-    type: 'object',
-    required: ['categories'],
-    properties: {
-      categories: {
-        type: 'array',
-        minItems: min,
-        maxItems: max,
-        items: {
-          type: 'object',
-          required: ['name', 'description', 'short_label'],
-          properties: {
-            name: { type: 'string', description: 'Short noun phrase, title case.' },
-            description: {
-              type: 'string',
-              description: 'One line: what belongs in this category.',
-            },
-            short_label: {
-              type: 'string',
-              description:
-                'ONE word where possible, plural, for filenames: Letters, ' +
-                'Reports, Notes, Certificates, Forms, Scans. Two words only if ' +
-                'one genuinely will not do. No punctuation.',
-            },
-          },
-        },
-      },
-    },
+export const FIXED_CATEGORIES: { name: string; description: string; short_label: string }[] = [
+  {
+    name: 'Letters',
+    description:
+      'Any letter or correspondence — referral, specialist, GP, insurer or legal correspondence.',
+    short_label: 'Letters',
   },
-});
+  {
+    name: 'Receipts',
+    description:
+      'Any bill, invoice, receipt or payment acknowledgement for an expense, whatever the expense was for and whoever issued it.',
+    short_label: 'Receipts',
+  },
+  {
+    name: 'Prescriptions',
+    description: 'Any prescription or medication order.',
+    short_label: 'Prescriptions',
+  },
+  {
+    name: 'Reports',
+    description:
+      'Any pathology, laboratory, imaging, investigation or other diagnostic report, from any department or provider.',
+    short_label: 'Reports',
+  },
+  {
+    name: 'Notes',
+    description: 'Any clinical, consultation, progress or handwritten note.',
+    short_label: 'Notes',
+  },
+  {
+    name: 'Unknown Type',
+    description:
+      'Does not fit Letters, Receipts, Prescriptions, Reports or Notes — a consent form, ' +
+      'claim form, identification document, witness statement, or anything else outside ' +
+      'those five.',
+    short_label: 'Documents',
+  },
+  {
+    name: 'Excluded',
+    description: 'Blank or contentless page belonging to no document.',
+    short_label: 'Excluded',
+  },
+];
 
 /** Fold near-identical names together so "GP Letters" and "GP letter" cannot
  *  both exist. Deliberately crude — it only has to catch spelling drift. */
@@ -96,7 +91,11 @@ export async function loadCategories(
 }
 
 /** Insert a category unless an equivalent name already exists. Returns the
- *  name that should actually be used. */
+ *  name that should actually be used. Kept as a general-purpose primitive —
+ *  ensureBaseCategories below does not use it, because it needs to UPDATE an
+ *  existing row's description/short_label too, which this intentionally never
+ *  does (an insert-if-missing that silently overwrote an existing category
+ *  would be a surprising thing for a future caller to run into). */
 export async function ensureCategory(
   sb: SupabaseClient,
   input: {
@@ -129,13 +128,10 @@ export async function ensureCategory(
   return input.name;
 }
 
-export interface TaxonomyResult {
-  categories: { name: string; description: string; short_label: string }[];
-  usage: Usage;
-}
-
-/** Fallback when the model gives no usable short label: the last substantive
- *  word of the category name, pluralised. "Specialist Letters" -> "Letters". */
+/** Fallback when a category has no usable short label: the last substantive
+ *  word of its name, pluralised. "Specialist Letters" -> "Letters". Not
+ *  needed by FIXED_CATEGORIES itself (every entry already names one) — kept
+ *  for ensureCategory, the general-purpose primitive above. */
 export function deriveShortLabel(name: string): string {
   const words = name
     .replace(/[^A-Za-z\s]/g, ' ')
@@ -146,107 +142,67 @@ export function deriveShortLabel(name: string): string {
   return /s$/i.test(word) ? word : `${word}s`;
 }
 
-export async function deriveTaxonomy(docs: ProposalDoc[]): Promise<TaxonomyResult> {
-  // One line per document: enough to see the shape of the bundle, small enough
-  // that a 130-document bundle is a few thousand tokens.
-  const listing = docs
-    .filter((d) => !d.excluded)
-    .map((d, i) => {
-      const bits = [d.title, d.org, d.doc_date].filter(Boolean).join(' · ');
-      return `${i + 1}. ${bits || 'unidentified document'} (${d.pages.length} page${
-        d.pages.length === 1 ? '' : 's'
-      })`;
-    })
-    .join('\n');
+/**
+ * Which of the currently active categories are NOT one of the fixed seven —
+ * the pure, testable half of ensureBaseCategories's cleanup step.
+ */
+export function staleCategoryNames(
+  active: { name: string }[],
+  fixed: { name: string }[] = FIXED_CATEGORIES,
+): string[] {
+  const keep = new Set(fixed.map((c) => normaliseName(c.name)));
+  return active.filter((c) => !keep.has(normaliseName(c.name))).map((c) => c.name);
+}
 
-  const blankCount = docs.filter((d) => d.excluded).length;
-  const realCount = docs.length - blankCount;
-  const { min, max } = categoryBudget(realCount);
+/**
+ * Make the `categories` table match FIXED_CATEGORIES exactly: every entry
+ * present with its current name's description and short_label (UPDATED, not
+ * left stale, if the row already existed under an earlier wording), and
+ * every other active category deactivated.
+ *
+ * Idempotent — safe to call on every bundle, not just the first. This is also
+ * what self-heals the table: the next bundle processed after this shipped
+ * automatically deactivates every category any previous (now-removed)
+ * per-bundle taxonomy call ever invented, with no separate migration needed.
+ */
+export async function ensureBaseCategories(sb: SupabaseClient): Promise<void> {
+  const existing = await loadCategories(sb, { activeOnly: false });
+  const byName = new Map(existing.map((c) => [normaliseName(c.name), c]));
 
-  const res = await claude().messages.create({
-    model: MODEL_CAREFUL,
-    max_tokens: 4000,
-    system: [{ type: 'text', text: TAXONOMY_SYSTEM }],
-    tools: [taxonomyTool(min, max)],
-    tool_choice: { type: 'tool', name: 'propose_categories' },
-    messages: [
-      {
-        role: 'user',
-        content:
-          `This bundle contains ${realCount} documents` +
-          (blankCount ? ` plus ${blankCount} blank page(s)` : '') +
-          `. Here is a one-line description of each:\n\n${listing}\n\n` +
-          `Propose between ${min} and ${max} categories for this bundle — ` +
-          `a set this size is what ${realCount} documents will divide into ` +
-          `without categories that overlap or hold a single document. ` +
-          `"Other" and "Excluded" count towards that total.`,
-      },
-    ],
-  });
-
-  const { categories } = toolResult<{
-    categories: { name?: string; description?: string; short_label?: string }[];
-  }>(res.content, 'propose_categories');
-
-  const cleaned = (categories ?? [])
-    .map((c) => {
-      const name = (c.name ?? '').trim();
-      const label = (c.short_label ?? '')
-        .trim()
-        .replace(/[^A-Za-z\s]/g, '')
-        .split(/\s+/)
-        .slice(0, 2)
-        .join(' ');
-      return {
-        name,
-        description: (c.description ?? '').trim(),
-        short_label: label || deriveShortLabel(name || 'Documents'),
-      };
-    })
-    .filter((c) => c.name && c.description);
-
-  // These two must exist whatever the model proposed: every bundle has blank
-  // pages to set aside, and every taxonomy needs somewhere to put the thing it
-  // did not anticipate.
-  for (const required of [
-    {
-      name: 'Other',
-      description: 'Does not fit any other category; a new one may be proposed.',
-      short_label: 'Documents',
-    },
-    {
-      name: 'Excluded',
-      description: 'Blank or contentless page belonging to no document.',
-      short_label: 'Excluded',
-    },
-  ]) {
-    if (!cleaned.some((c) => normaliseName(c.name) === normaliseName(required.name))) {
-      cleaned.push(required);
+  for (const [i, c] of FIXED_CATEGORIES.entries()) {
+    const sortOrder = /^excluded$/i.test(c.name) ? 900 : i * 10;
+    const row = byName.get(normaliseName(c.name));
+    if (row) {
+      const { error } = await sb
+        .from('categories')
+        .update({
+          description: c.description,
+          short_label: c.short_label,
+          active: true,
+          sort_order: sortOrder,
+        })
+        .eq('id', row.id);
+      if (error) throw error;
+    } else {
+      const { error } = await sb.from('categories').insert({
+        name: c.name,
+        description: c.description,
+        short_label: c.short_label,
+        origin: 'manual',
+        active: true,
+        sort_order: sortOrder,
+      });
+      if (error) throw error;
     }
   }
 
-  return { categories: cleaned, usage: readUsage(res.usage) };
-}
-
-/** Derive and persist in one step. Returns the stored taxonomy. */
-export async function deriveAndStoreTaxonomy(
-  sb: SupabaseClient,
-  sessionId: string,
-  docs: ProposalDoc[],
-): Promise<{ categories: Category[]; usage: Usage }> {
-  const { categories, usage } = await deriveTaxonomy(docs);
-
-  for (const [i, c] of categories.entries()) {
-    await ensureCategory(sb, {
-      name: c.name,
-      description: c.description,
-      shortLabel: c.short_label,
-      origin: 'derived',
-      sessionId,
-      // "Other" and "Excluded" sort last wherever the model happened to put them.
-      sortOrder: /^(other|excluded)$/i.test(c.name) ? 900 + i : i * 10,
-    });
+  const stale = staleCategoryNames(
+    existing.filter((c) => c.active),
+    FIXED_CATEGORIES,
+  );
+  if (stale.length) {
+    const ids = existing.filter((c) => stale.includes(c.name)).map((c) => c.id);
+    const { error } = await sb.from('categories').update({ active: false }).in('id', ids);
+    if (error) throw error;
   }
-
-  return { categories: await loadCategories(sb), usage };
 }

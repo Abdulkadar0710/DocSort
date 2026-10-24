@@ -50,6 +50,10 @@ const CATEGORISE_TOOL: Anthropic.Tool = {
       'desc',
       'person_name',
       'person_dob',
+      'person_gender',
+      'person_age',
+      'person_patient_id',
+      'person_address',
       'relates',
       'relates_reason',
       'confidence',
@@ -59,7 +63,7 @@ const CATEGORISE_TOOL: Anthropic.Tool = {
       category: { type: 'string', description: 'Exactly one of the CATEGORIES names.' },
       proposed_category: {
         type: 'string',
-        description: 'Only when category is "Other": a short new category name.',
+        description: 'Only when category is "Unknown Type": a short name for what it actually is.',
       },
       proposed_category_reason: {
         type: 'string',
@@ -83,6 +87,26 @@ const CATEGORISE_TOOL: Anthropic.Tool = {
       person_dob: {
         type: 'string',
         description: 'That person\'s date of birth as printed, DD/MM/YYYY, or "unknown".',
+      },
+      person_gender: {
+        type: 'string',
+        description:
+          '"male" or "female", ONLY from an explicit printed field or title ' +
+          '(Mr, Mrs, Miss, Smt, Shri) — never guessed from the given name. "unknown" otherwise.',
+      },
+      person_age: {
+        type: 'string',
+        description: 'That person\'s age as printed (e.g. "45"), or "unknown". Not derived from a DOB.',
+      },
+      person_patient_id: {
+        type: 'string',
+        description:
+          'The subject\'s own registration/UHID/patient number, not a bill, ' +
+          'receipt, invoice or lab sample number. "unknown" if none is printed.',
+      },
+      person_address: {
+        type: 'string',
+        description: 'That person\'s address as printed, or "unknown".',
       },
       relates: { type: 'string', enum: ['yes', 'no', 'uncertain', 'n/a'] },
       relates_reason: {
@@ -123,6 +147,10 @@ interface RawCategorise {
   org?: string;
   person_name?: string;
   person_dob?: string;
+  person_gender?: string;
+  person_age?: string;
+  person_patient_id?: string;
+  person_address?: string;
   relates?: Relates;
   relates_reason?: string;
   review?: ReviewFlag[];
@@ -217,14 +245,15 @@ export async function categoriseDocument(opts: {
 
   const raw = toolResult<RawCategorise>(res.content, 'categorise_document');
 
-  // Hold the model to the taxonomy: anything outside it becomes "Other" with
-  // the offered name recorded as a proposal, rather than silently inventing a
-  // category that no other document will ever be filed under.
+  // Hold the model to the fixed taxonomy: anything outside it becomes
+  // "Unknown Type" with the offered name recorded as a proposal, rather than
+  // silently inventing a category that no other document will ever be filed
+  // under.
   const names = new Map(categories.map((c) => [normaliseName(c.name), c.name]));
   const offered = orNull(raw.category);
   const matched = offered ? names.get(normaliseName(offered)) : null;
 
-  let doc_type = matched ?? 'Other';
+  let doc_type = matched ?? 'Unknown Type';
   let proposed = orNull(raw.proposed_category);
   let proposedReason = orNull(raw.proposed_category_reason);
 
@@ -276,6 +305,10 @@ export async function categoriseDocument(opts: {
     // clustering settles on; this keeps the original for the reviewer.
     person_name_printed: orNull(raw.person_name),
       person_dob: orNull(raw.person_dob),
+      person_gender: orNull(raw.person_gender),
+      person_age: orNull(raw.person_age),
+      person_patient_id: orNull(raw.person_patient_id),
+      person_address: orNull(raw.person_address),
       // Assigned by clustering once every document has been read, so that
       // spelling variants of one person collapse rather than each becoming
       // their own group.

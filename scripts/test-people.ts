@@ -3,6 +3,7 @@
  *   npx tsx scripts/test-people.ts
  */
 import {
+  approxBirthYear,
   clusterPeople,
   matchTier,
   MATCH_EXACT,
@@ -10,6 +11,7 @@ import {
   MATCH_SPELLING,
   NO_MATCH,
   normaliseDob,
+  normaliseGender,
   parseName,
   personFolder,
   samePerson,
@@ -156,10 +158,52 @@ check(
   matchTier({ name: 'Gouri w/o Amit Solanki', dob: null }, { name: 'Amit Solanki', dob: null }) === NO_MATCH,
 );
 
+// The slash is routinely dropped — by OCR, or by whoever typed it up — leaving
+// a bare "Wo"/"So"/"Do" sitting between two names. A real session hit this
+// exactly: "Mrs. Gori Wo Amit" read as one ungrouped three-word name and
+// matched nobody, until the marker was recognised without its slash.
+check(
+  'a dropped slash still resolves to the subject',
+  parseName('Mrs. Gori Wo Amit').subject.join(' ') === 'gori',
+  parseName('Mrs. Gori Wo Amit').subject.join(' '),
+);
+check(
+  'and still matches the client on spelling',
+  matchTier({ name: 'Gauri Solanki', dob: null }, { name: 'Mrs. Gori Wo Amit', dob: null }) === MATCH_NEAR,
+);
+check(
+  '"D.O." with a dot instead of a slash works the same way',
+  parseName('Rahul D.O. Amit Solanki').subject.join(' ') === 'rahul solanki',
+  parseName('Rahul D.O. Amit Solanki').subject.join(' '),
+);
+
+// Whatever sits between — or after — the given name and surname is noise:
+// a trailing honorific, a lab registration number, a junk word a relation
+// marker didn't catch. The exact check above assumes the surname is the
+// LAST token, which trailing noise defeats; this is position-independent on
+// purpose, as long as one side is a clean two-token reference to compare
+// against (a typed client name, or a group's already-settled label).
+check('a trailing honorific does not push the surname out of reach', tier('Gauri Solanki Devi') === MATCH_EXACT);
+check('a junk word between given and surname is ignored', tier('Gauri XYZ Solanki') === MATCH_EXACT);
+check('a registration number in the middle is ignored', tier('Gauri R No 456 Solanki') === MATCH_EXACT);
+check(
+  'noise AND a spelling variant together still resolve',
+  tier('Mrs Gori ABC Solanki') === MATCH_NEAR,
+  String(tier('Mrs Gori ABC Solanki')),
+);
+
 // Loosening on spelling must not loosen on identity.
 check('a different given name is a different person', tier('Amit Solanki') === NO_MATCH);
 check('a surname two letters out is a different family', tier('Gauri Solankar') === NO_MATCH);
 check('an unrelated surname never matches', tier('Gauri Sharma') === NO_MATCH);
+check(
+  'noise does not rescue a genuinely different given name',
+  tier('Amit XYZ Solanki') === NO_MATCH,
+);
+check(
+  'noise does not rescue a genuinely different surname',
+  tier('Gauri XYZ Sharma') === NO_MATCH,
+);
 check('Marsh is not Marsden', matchTier({ name: 'Daniel Marsh', dob: null }, { name: 'Daniel Marsden', dob: null }) === NO_MATCH);
 
 // A date of birth outranks spelling in both directions.
@@ -214,6 +258,119 @@ const absent = clusterPeople(
 );
 check('a client with no documents is not listed', absent.people.length === 1, String(absent.people.length));
 check('and nobody is wrongly marked the client', absent.people.every((p) => !p.isClient));
+
+// ------------------------------------------------------- other identity clues
+//
+// Gender, a derived birth year, patient ID, address and the spouse name
+// already parsed out of "w/o" constructions — used the way a human reviewer
+// would, alongside the name and date of birth.
+
+check('normaliseGender reads an explicit field', normaliseGender('Female') === 'female');
+check('normaliseGender reads a title', normaliseGender('Mrs') === 'female', String(normaliseGender('Mrs')));
+check('normaliseGender never guesses from a given name', normaliseGender('Priya') === null);
+check('normaliseGender treats "unknown" as null', normaliseGender('unknown') === null);
+
+check('approxBirthYear derives a birth year from age and doc date', approxBirthYear('45', '12/06/2022') === 1977, String(approxBirthYear('45', '12/06/2022')));
+check(
+  'approxBirthYear uses the first date of a running-record range',
+  approxBirthYear('45', '12/06/2022 - 15/06/2022') === 1977,
+);
+check('approxBirthYear needs both inputs', approxBirthYear(null, '12/06/2022') === null && approxBirthYear('45', null) === null);
+
+// Gender — decisive, like a differing date of birth. This is the resolution
+// for keeping a partner who shares a surname AND an address from being
+// absorbed into the client: address is allowed to corroborate (below), but a
+// conflicting gender still splits them regardless.
+check(
+  'a mismatched gender splits even an identical name',
+  matchTier(
+    { name: 'Gauri Solanki', dob: null, gender: 'female' },
+    { name: 'Gauri Solanki', dob: null, gender: 'male' },
+  ) === NO_MATCH,
+);
+check(
+  'gender overrides a shared surname AND address that would otherwise promote a near miss',
+  matchTier(
+    { name: 'Alex Petrakis', dob: null, gender: 'male', address: '4 Example Road, Carrick Park' },
+    { name: 'Alexa Petrakis', dob: null, gender: 'female', address: '4 Example Road, Carrick Park' },
+  ) === NO_MATCH,
+);
+
+// A derived birth year is the same check, loosened for documents that print
+// an age instead of a date of birth — close enough (rounding) changes
+// nothing; decades apart splits them the way a differing DOB does.
+check(
+  'birth years two years apart are not a conflict',
+  matchTier({ name: 'Gauri Solanki', dob: null, approxBirthYear: 1980 }, { name: 'Gauri Solanki', dob: null, approxBirthYear: 1981 }) === MATCH_EXACT,
+);
+check(
+  'birth years decades apart split an identical name',
+  matchTier({ name: 'Gauri Solanki', dob: null, approxBirthYear: 1980 }, { name: 'Gauri Solanki', dob: null, approxBirthYear: 1960 }) === NO_MATCH,
+);
+
+// Patient ID — decisive on conflict, confirming on agreement, but only ever
+// alongside a name that already reads as at least a plausible spelling
+// variant; it never rescues a name that reads as a different person.
+check(
+  'a matching patient ID promotes a near miss out of flagging',
+  matchTier(
+    { name: 'Gauri Solanki', dob: null, patientId: 'UHID-2019/00123' },
+    { name: 'Gori Solank', dob: null, patientId: 'uhid 2019 00123' },
+  ) === MATCH_SPELLING,
+);
+check(
+  'a matching patient ID does not rescue a genuinely different name',
+  matchTier(
+    { name: 'Amit Solanki', dob: null, patientId: 'UHID-2019-00123' },
+    { name: 'Gauri Solanki', dob: null, patientId: 'UHID-2019-00123' },
+  ) === NO_MATCH,
+);
+check(
+  'a mismatched patient ID splits even an identical name',
+  matchTier(
+    { name: 'Gauri Solanki', dob: null, patientId: 'UHID-2019-00123' },
+    { name: 'Gauri Solanki', dob: null, patientId: 'UHID-2019-00456' },
+  ) === NO_MATCH,
+);
+
+// Address — confirming only, same rule as patient ID: it can settle a name
+// that already resembles the other, never rescue one that does not.
+check(
+  'a matching address promotes a near miss out of flagging',
+  matchTier(
+    { name: 'Gauri Solanki', dob: null, address: '12 MG Road, Indore' },
+    { name: 'Gori Solank', dob: null, address: '12 M.G. Road, Indore' },
+  ) === MATCH_SPELLING,
+);
+check(
+  'a matching address does not rescue a genuinely different name',
+  matchTier(
+    { name: 'Amit Solanki', dob: null, address: '12 MG Road, Indore' },
+    { name: 'Gauri Solanki', dob: null, address: '12 MG Road, Indore' },
+  ) === NO_MATCH,
+);
+
+// Spouse name — parsed out of the "w/o" construction already, and discarded
+// from the subject's own tokens so the record never drifts into his file; but
+// read for the opposite purpose too: two documents that disagree on the
+// subject's own surname spelling yet agree on who her husband is corroborate
+// each other, exactly the real pattern this session's bundle turned up
+// (several of Gouri's documents could not agree on her surname, but every one
+// named "Amit" as her husband).
+check(
+  'a matching spouse name promotes a near miss out of flagging',
+  matchTier(
+    { name: 'Gori w/o Amit Solanki', dob: null },
+    { name: 'Gori Solank w/o Amit Solanki', dob: null },
+  ) === MATCH_SPELLING,
+);
+check(
+  'a different spouse name does not promote the same spelling gap',
+  matchTier(
+    { name: 'Gori w/o Amit Solanki', dob: null },
+    { name: 'Gori Solank w/o Suresh Solanki', dob: null },
+  ) === MATCH_NEAR,
+);
 
 console.log(`\n${pass} passed, ${fails.length} failed`);
 if (fails.length) {

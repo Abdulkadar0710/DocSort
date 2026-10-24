@@ -19,9 +19,21 @@
  * being passed off as a confirmed identity.
  */
 
+export type Gender = 'male' | 'female';
+
 export interface PersonRef {
   name: string | null;
   dob: string | null;
+  /** Only ever set from an explicit printed field or title — never guessed
+   *  from the given name itself. */
+  gender?: Gender | null;
+  /** Patient/registration/UHID number, as printed. */
+  patientId?: string | null;
+  address?: string | null;
+  /** Birth year implied by a printed age and the document's own date — not a
+   *  date of birth, just loose enough to catch an age that reads decades off,
+   *  the way a differing DOB does. */
+  approxBirthYear?: number | null;
 }
 
 export interface PersonGroup {
@@ -29,6 +41,10 @@ export interface PersonGroup {
   /** The fullest spelling seen, for display. */
   name: string;
   dob: string | null;
+  gender?: Gender | null;
+  patientId?: string | null;
+  address?: string | null;
+  approxBirthYear?: number | null;
   isClient: boolean;
   docKeys: string[];
   pages: number[];
@@ -50,8 +66,18 @@ const TITLES = /\b(mr|mrs|ms|miss|dr|prof|sr|jr|shri|smt|kum)\b/g;
  * Reading the whole string as one name is not merely imprecise, it is wrong in
  * a way that misfiles records: the husband's full name is in there, so the
  * document matches HIM better than it matches her.
+ *
+ * The slash itself is optional: OCR and manual retyping both drop it as often
+ * as not ("Gori Wo Amit"), leaving a bare two-letter word sitting between two
+ * names. Requiring the slash missed exactly that case — the whole string fell
+ * back to being read as one ungrouped name and matched nobody. A dot is
+ * accepted too ("W.O."). This does mean a real surname that happens to be
+ * bare "Ho", "So" or "Do" — genuine East Asian surnames — sitting between two
+ * other name-like words could be misread as a marker; accepted here because
+ * this parser is for Indian medico-legal records, where that marker is common
+ * and such surnames are not.
  */
-const RELATION = /\b(?:[wsdch]\s*\/\s*o|(?:wife|son|daughter|care|husband)\s+of)\b/;
+const RELATION = /\b(?:[wsdch]\s*[/.]?\s*o|(?:wife|son|daughter|care|husband)\s+of)\b/;
 
 /**
  * Spelling variants of one name, collapsed.
@@ -130,11 +156,20 @@ export function parseName(raw: string | null): ParsedName {
   const marker = RELATION.exec(s);
   if (!marker) return { subject: tokenise(s), relative: [] };
 
-  const subject = tokenise(s.slice(0, marker.index));
-  const relative = tokenise(s.slice(marker.index + marker[0].length));
+  // A parenthetical aside ("Amit Balasuya (Dhar)") is a note about the
+  // relative, not a second surname to borrow — same rule parsePeople applies.
+  const subject = tokenise(s.slice(0, marker.index).replace(/\([^)]*\)/g, ''));
+  const relative = tokenise(
+    s.slice(marker.index + marker[0].length).replace(/\([^)]*\)/g, ''),
+  );
 
-  // No surname of her own: take his.
-  if (subject.length === 1 && relative.length) {
+  // No surname of her own: take his — but only when he has one to give. A
+  // relative reduced to a single token ("S/O Amit 210", the 210 a lab number
+  // stripped away above) has no surname either, and borrowing that token
+  // manufactures a surname nobody has ("Gouri Amit"), which is worse than
+  // leaving her with none: a bare given name still matches the fuller name
+  // on file, a fabricated surname does not.
+  if (subject.length === 1 && relative.length > 1) {
     subject.push(relative[relative.length - 1]);
   }
   return { subject: subject.length ? subject : relative, relative };
@@ -154,6 +189,88 @@ export function normaliseDob(raw: string | null): string | null {
   m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(t);
   if (m) return `${m[1]}${m[2]}${m[3]}`;
   return null;
+}
+
+/** Normalise a printed gender/sex field or title to a plain Male/Female, or
+ *  null for anything else (including "unknown" and anything not explicitly
+ *  one of the two) — this is never guessed from the given name. */
+export function normaliseGender(raw: string | null | undefined): Gender | null {
+  if (!raw) return null;
+  const s = raw.trim().toLowerCase();
+  if (/^m(ale)?$/.test(s) || TITLES_MALE.has(s)) return 'male';
+  if (/^f(emale)?$/.test(s) || TITLES_FEMALE.has(s)) return 'female';
+  return null;
+}
+
+const TITLES_MALE = new Set(['mr', 'shri', 'sri']);
+const TITLES_FEMALE = new Set(['mrs', 'ms', 'miss', 'smt', 'kum', 'kumari']);
+
+/** Patient/registration/UHID numbers compared on their digits-and-letters
+ *  only, so "UHID-2019/00123" and "uhid 2019 00123" read as the same value —
+ *  genuinely different numbers still differ once punctuation is stripped. */
+function normaliseId(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const s = raw.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return s || null;
+}
+
+const ADDRESS_FILLER = new Set([
+  'road', 'street', 'st', 'near', 'opp', 'opposite', 'behind', 'house', 'no',
+  'ward', 'colony', 'nagar', 'dist', 'district', 'tehsil', 'taluka', 'po',
+  'ps', 'pin', 'india', 'the', 'and', 'of',
+]);
+
+function addressTokens(raw: string): Set<string> {
+  return new Set(
+    raw
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter((t) => t.length > 1 && !ADDRESS_FILLER.has(t)),
+  );
+}
+
+/**
+ * Two addresses read as the same place once filler words — "road", "near",
+ * "dist" — are stripped out: what is left (house/plot numbers, street and
+ * area names) overlaps enough to say so.
+ *
+ * Deliberately loose, and deliberately only ever used to CONFIRM an
+ * already-plausible name match (see matchTier) — never to merge two
+ * genuinely different names on its own. A shared address is exactly as
+ * likely to mean "two family members" as "one person", which is why it never
+ * acts alone; see matchTier's gender and approxBirthYear checks for the other
+ * half of that guard.
+ */
+function sameishAddress(a: string, b: string): boolean {
+  const ta = addressTokens(a);
+  const tb = addressTokens(b);
+  if (!ta.size || !tb.size) return false;
+  const shared = [...ta].filter((t) => tb.has(t));
+  const smaller = Math.min(ta.size, tb.size);
+  return shared.length >= 2 && shared.length / smaller >= 0.6;
+}
+
+/** How many years apart two documents' implied birth years may be before an
+ *  age reading is treated as a genuine conflict rather than rounding. */
+const AGE_TOLERANCE_YEARS = 2;
+
+/** A rough birth year implied by a printed age and the date the document
+ *  itself carries — e.g. age "45" on a document dated 12/06/2022 implies a
+ *  birth year around 1977. Deliberately coarse: ages are commonly rounded, so
+ *  this only ever catches a gross mismatch (decades off), never confirms an
+ *  identity on its own. */
+export function approxBirthYear(
+  age: string | null | undefined,
+  docDate: string | null | undefined,
+): number | null {
+  if (!age || !docDate) return null;
+  const ageNum = parseInt(age, 10);
+  if (!Number.isFinite(ageNum) || ageNum <= 0 || ageNum > 120) return null;
+  const first = docDate.split(/\s*[-–]\s*/)[0]?.trim();
+  const m = /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/.exec(first ?? '');
+  if (!m) return null;
+  return Number(m[3]) - ageNum;
 }
 
 /**
@@ -201,8 +318,50 @@ export function matchTier(a: PersonRef, b: PersonRef): number {
   if (da && db && da !== db) return NO_MATCH;
   const dobConfirms = !!da && da === db;
 
-  const xa = nameTokens(a.name);
-  const xb = nameTokens(b.name);
+  // Gender and a derived birth year are the other two identifiers that a
+  // family member sharing a surname AND an address cannot also share, so they
+  // carry the same weight as a differing date of birth: decisive, checked
+  // before the name is even read, and never overridden by how close the
+  // spelling is.
+  if (a.gender && b.gender && a.gender !== b.gender) return NO_MATCH;
+  if (
+    a.approxBirthYear != null &&
+    b.approxBirthYear != null &&
+    Math.abs(a.approxBirthYear - b.approxBirthYear) > AGE_TOLERANCE_YEARS
+  ) {
+    return NO_MATCH;
+  }
+
+  // A patient/registration ID is assigned by the facility specifically to
+  // settle this question, so two different values printed for two documents
+  // is as decisive as two different dates of birth.
+  const idA = normaliseId(a.patientId);
+  const idB = normaliseId(b.patientId);
+  if (idA && idB && idA !== idB) return NO_MATCH;
+  const idConfirms = !!idA && idA === idB;
+
+  const addressConfirms =
+    !!a.address && !!b.address && sameishAddress(a.address, b.address);
+
+  // The spouse/guardian named only to identify the subject ("w/o Amit") is
+  // discarded from the subject's own tokens below so the record cannot drift
+  // into HIS file — but it is still read for the opposite purpose: if two
+  // documents disagree on the subject's own surname yet agree on who her
+  // husband is, that is real corroboration, not a coincidence.
+  const parsedA = parseName(a.name);
+  const parsedB = parseName(b.name);
+  const relA = parsedA.relative.map(normaliseName).filter(Boolean);
+  const relB = parsedB.relative.map(normaliseName).filter(Boolean);
+  const spouseConfirms = relA.length > 0 && relB.length > 0 && tokensAgree(relA, relB);
+
+  // None of these four is ever enough on its own to rescue a name that reads
+  // as a different person (checked below, at the same two spots the lone
+  // dobConfirms check used to occupy) — only to settle a name that is already
+  // a plausible spelling variant.
+  const confirms = dobConfirms || idConfirms || addressConfirms || spouseConfirms;
+
+  const xa = parsedA.subject;
+  const xb = parsedB.subject;
   if (!xa.length || !xb.length) return NO_MATCH;
 
   if (tokensAgree(xa, xb)) return MATCH_EXACT;
@@ -212,13 +371,21 @@ export function matchTier(a: PersonRef, b: PersonRef): number {
   if (!na.length || !nb.length) return NO_MATCH;
   if (tokensAgree(na, nb)) return MATCH_SPELLING;
 
-  // A single name part on either side is too little to risk a fuzzy match on —
-  // "Marsh" and "Walsh" are one letter apart and unrelated. Only a date of
-  // birth can carry that.
+  // One side has lost its surname entirely — not uncommon here, since a
+  // subject named only by relation ("w/o Amit") keeps no surname of her own
+  // when the relative's name is itself reduced to one word. The lone token is
+  // compared against BOTH ends of the fuller name, because it could be either:
+  // a bare surname ("Marsh" and "Walsh" are one letter apart and unrelated, so
+  // that reading needs a confirming clue to trust) or a bare given name (far
+  // less commonly shared, and the usual shape of a name a relation-marker
+  // stripped down to), which a close spelling match can carry on its own.
   if (na.length < 2 || nb.length < 2) {
-    return dobConfirms && editDistance(na[na.length - 1], nb[nb.length - 1]) <= SURNAME_BUDGET
-      ? MATCH_SPELLING
-      : NO_MATCH;
+    const long = na.length >= nb.length ? na : nb;
+    const lone = na.length >= nb.length ? nb : na;
+    const matchesGiven = editDistance(lone[0], long[0]) <= GIVEN_BUDGET;
+    const matchesSurname = editDistance(lone[0], long[long.length - 1]) <= SURNAME_BUDGET;
+    if (confirms && (matchesGiven || matchesSurname)) return MATCH_SPELLING;
+    return matchesGiven ? MATCH_NEAR : NO_MATCH;
   }
 
   const surname = editDistance(na[na.length - 1], nb[nb.length - 1]);
@@ -228,8 +395,31 @@ export function matchTier(a: PersonRef, b: PersonRef): number {
     given <= GIVEN_BUDGET &&
     surname + given <= TOTAL_BUDGET
   ) {
-    // A date of birth that agrees settles it; the spelling no longer matters.
-    return dobConfirms ? MATCH_SPELLING : MATCH_NEAR;
+    // A confirming clue that agrees settles it; the spelling no longer matters.
+    return confirms ? MATCH_SPELLING : MATCH_NEAR;
+  }
+
+  // The check above assumes the given name sits first and the surname last —
+  // true of a clean "Gauri Solanki", false the moment anything trails after
+  // the real surname ("Gauri Solanki Devi", a lab code, a second honorific):
+  // the surname gets pushed out of the last slot and the check above fails
+  // even though both names are plainly right there. Whatever sits BETWEEN or
+  // AROUND the given name and surname — a relation marker's leftovers, a
+  // registration number, a title the regex didn't catch — is noise once a
+  // clean two-token reference (a session's typed client name, or a person
+  // group's already-settled label) is being compared against a messier
+  // printed one: if the given name shows up somewhere in the messier name and
+  // the surname shows up somewhere else in it, position no longer matters.
+  const [clean, messy] = na.length <= nb.length ? [na, nb] : [nb, na];
+  if (clean.length === 2) {
+    const [cleanGiven, cleanSurname] = clean;
+    const givenAt = messy.findIndex((t) => editDistance(t, cleanGiven) <= GIVEN_BUDGET);
+    const surnameAt = messy.findIndex(
+      (t, i) => i !== givenAt && editDistance(t, cleanSurname) <= SURNAME_BUDGET,
+    );
+    if (givenAt !== -1 && surnameAt !== -1) {
+      return confirms ? MATCH_SPELLING : MATCH_NEAR;
+    }
   }
 
   return NO_MATCH;
@@ -255,6 +445,15 @@ export interface PersonDoc {
    */
   person_name_printed?: string | null;
   person_dob: string | null;
+  /** Only ever set from an explicit printed field or title — never guessed
+   *  from the given name itself. */
+  person_gender?: string | null;
+  person_patient_id?: string | null;
+  person_address?: string | null;
+  /** As printed, e.g. "45" — combined with doc_date to derive a rough birth
+   *  year for documents that print an age instead of a date of birth. */
+  person_age?: string | null;
+  doc_date?: string | null;
 }
 
 export interface ClusterResult<T extends PersonDoc> {
@@ -300,6 +499,10 @@ export function clusterPeople<T extends PersonDoc>(
       key: keyFor(clientTokens, client.dob),
       name: client.name!,
       dob: client.dob,
+      gender: client.gender ?? null,
+      patientId: client.patientId ?? null,
+      address: client.address ?? null,
+      approxBirthYear: client.approxBirthYear ?? null,
       isClient: true,
       docKeys: [],
       pages: [],
@@ -314,7 +517,18 @@ export function clusterPeople<T extends PersonDoc>(
       .map((x) => x.trim())
       .filter(Boolean);
     const printed = spellings[0] ?? null;
-    const ref: PersonRef = { name: printed, dob: doc.person_dob };
+    const gender = normaliseGender(doc.person_gender);
+    const patientId = doc.person_patient_id?.trim() || null;
+    const address = doc.person_address?.trim() || null;
+    const birthYear = approxBirthYear(doc.person_age, doc.doc_date);
+    const ref: PersonRef = {
+      name: printed,
+      dob: doc.person_dob,
+      gender,
+      patientId,
+      address,
+      approxBirthYear: birthYear,
+    };
     const tokens = nameTokens(printed);
 
     if (!tokens.length) {
@@ -327,7 +541,17 @@ export function clusterPeople<T extends PersonDoc>(
     let best: (typeof groups)[number] | null = null;
     let bestTier = NO_MATCH;
     for (const g of groups) {
-      const tier = matchTier({ name: g.name, dob: g.dob }, ref);
+      const tier = matchTier(
+        {
+          name: g.name,
+          dob: g.dob,
+          gender: g.gender,
+          patientId: g.patientId,
+          address: g.address,
+          approxBirthYear: g.approxBirthYear,
+        },
+        ref,
+      );
       if (tier < bestTier) {
         best = g;
         bestTier = tier;
@@ -350,6 +574,10 @@ export function clusterPeople<T extends PersonDoc>(
         }
       }
       best.dob ??= doc.person_dob;
+      best.gender ??= gender;
+      best.patientId ??= patientId;
+      best.address ??= address;
+      best.approxBirthYear ??= birthYear;
       best.docKeys.push(doc.doc_key);
       best.pages.push(...doc.pages);
       assigned.set(doc.doc_key, best.key);
@@ -362,6 +590,10 @@ export function clusterPeople<T extends PersonDoc>(
       key,
       name: printed!,
       dob: doc.person_dob,
+      gender,
+      patientId,
+      address,
+      approxBirthYear: birthYear,
       isClient: false,
       docKeys: [doc.doc_key],
       pages: [...doc.pages],

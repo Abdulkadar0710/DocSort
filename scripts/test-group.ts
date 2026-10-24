@@ -44,6 +44,10 @@ function doc(
     relates_reason: null,
     person_name: 'Daniel James Marsh',
     person_dob: '14/03/1984',
+    person_gender: null,
+    person_age: null,
+    person_patient_id: null,
+    person_address: null,
     person_key: 'daniel-james-marsh-19840314',
     dup_of: null,
     review: [],
@@ -210,7 +214,9 @@ check('provenance recorded in the overview', (holding(3).overview ?? '').include
   check('blank page stays excluded', withBlank.find((d) => d.pages.includes(3))!.excluded);
 }
 
-// A suspected copy stays separate so it can be compared.
+// A suspected copy merges like any other document of its category — the
+// reviewer asked for one combined document per category, period — but the
+// flag itself is carried onto the merged document rather than silently lost.
 {
   const { docs: withCopy } = groupByCategory([
     doc('D001', 1, 'Reports'),
@@ -218,7 +224,35 @@ check('provenance recorded in the overview', (holding(3).overview ?? '').include
       review: [{ code: 'possible_copy', message: 'Looks like a file copy of D001' }],
     }),
   ]);
-  check('a possible copy is not absorbed', withCopy.length === 2, String(withCopy.length));
+  check('a possible copy is absorbed into the merge', withCopy.length === 1, String(withCopy.length));
+  check(
+    'the possible_copy flag survives onto the merged document',
+    withCopy[0].review.some((f) => f.code === 'possible_copy'),
+  );
+}
+
+// A document naming several different patients at once is a different
+// concern — not "this might be a copy" but "this document itself is not
+// wholly about one person" — and still stays out of the merge.
+{
+  const { docs: withMultiple } = groupByCategory([
+    doc('D001', 1, 'Reports'),
+    doc('D002', 2, 'Reports', {
+      review: [{ code: 'multiple_patients', message: 'Ward handover sheet lists eight patients' }],
+    }),
+  ]);
+  check('multiple_patients still stays out of the merge', withMultiple.length === 2, String(withMultiple.length));
+}
+
+// A confirmed duplicate of a SPECIFIC other document (dup_of) is a separate
+// relationship from "possible copy", and still stays separate — merging it
+// in would make dup_of's target reference meaningless.
+{
+  const { docs: withDupOf } = groupByCategory([
+    doc('D001', 1, 'Reports'),
+    doc('D002', 2, 'Reports', { dup_of: 'D001' }),
+  ]);
+  check('a confirmed duplicate still stays out of the merge', withDupOf.length === 2, String(withDupOf.length));
 }
 
 console.log(`\n${pass} passed, ${fails.length} failed`);
