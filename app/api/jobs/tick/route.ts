@@ -8,7 +8,7 @@ import { categoriseDocument } from '@/lib/ai/categorise';
 import { asRemovedDuplicate, candidatePairs, confirmDuplicate } from '@/lib/ai/duplicates';
 import { ensureBaseCategories, FIXED_CATEGORIES, loadCategories } from '@/lib/ai/taxonomy';
 import { fetchBundle, sliceForModel, slicePagesForModel } from '@/lib/pdf/slice';
-import { isAuthoritative, planWindows } from '@/lib/ai/windows';
+import { isAuthoritative, planWindows, reconcileReadings, type Reading } from '@/lib/ai/windows';
 import { loadProposal, saveRevision } from '@/lib/proposal/store';
 import { groupByCategory } from '@/lib/proposal/group';
 import { clusterPeople, MATCH_NEAR, UNIDENTIFIED } from '@/lib/proposal/people';
@@ -541,9 +541,24 @@ async function runGrouping(
     clustered.people.map((p) => p.key),
   );
 
-  // Idempotent by construction: once grouped, every category holds a single
-  // document, so a repeat run finds nothing to merge and changes nothing.
-  if (!merged.length && !removed.length) {
+  // Who each document belongs to is part of the result too, not only merges.
+  // Skipping the save whenever nothing merged left every document of a small
+  // bundle with no person_key, relates or identity flags on record.
+  const before = new Map(current.docs.map((d) => [d.doc_key, d]));
+  const identityChanged = withPeople.some((d) => {
+    const was = before.get(d.doc_key);
+    return (
+      !was ||
+      was.person_key !== d.person_key ||
+      was.person_name !== d.person_name ||
+      was.relates !== d.relates ||
+      JSON.stringify(was.review) !== JSON.stringify(d.review)
+    );
+  });
+
+  // Idempotent by construction: once grouped and stamped, a repeat run finds
+  // nothing to merge and no identity to change, and saves nothing.
+  if (!merged.length && !removed.length && !identityChanged) {
     await sb.from('jobs').update({ status: 'done', result: { merged: [] } }).eq('id', jobId);
     return;
   }
@@ -570,8 +585,9 @@ async function runGrouping(
   const saved = await saveRevision(sb, sessionId, docs, {
     origin: 'ai',
     summary:
-      `${peopleLine}${removedLine}` +
-      (merged.length ? `Gathered same-category documents: ${detail}.` : ''),
+      (`${peopleLine}${removedLine}` +
+        (merged.length ? `Gathered same-category documents: ${detail}.` : '')).trim() ||
+      'Identified who each document is about; nothing needed grouping.',
     pageCount,
     parentRevision: current.revision,
   });
@@ -629,13 +645,20 @@ async function runStitch(
   // answer comes from the window that saw the most pages before it, so its
   // "does this continue the previous page?" judgement was never made blind.
   const chosen = new Map<number, PageSignals>();
+  const otherReadings = new Map<number, Reading[]>();
   for (const job of jobs) {
     if (job.kind !== 'classify' || job.status !== 'done' || !job.result) continue;
     const { signals } = job.result as { signals: PageSignals[] };
     const w = { start: job.window_start!, end: job.window_end! };
     for (const s of signals ?? []) {
       if (isAuthoritative(s.page_number, w, windows)) chosen.set(s.page_number, s);
+      else otherReadings.set(s.page_number, [...(otherReadings.get(s.page_number) ?? []), { signals: s, window: w }]);
     }
+  }
+  // Where another window read the same page differently, don't take the
+  // authoritative reading on trust (see reconcileReadings).
+  for (const [page, s] of chosen) {
+    chosen.set(page, reconcileReadings(s, otherReadings.get(page) ?? []));
   }
 
   // Any page no window described still gets a place in the split, flagged,

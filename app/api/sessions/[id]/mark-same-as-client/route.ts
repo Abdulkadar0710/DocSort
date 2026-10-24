@@ -65,7 +65,16 @@ export async function POST(
     return NextResponse.json({ error: 'this session has no proposal yet' }, { status: 409 });
   }
 
-  const moving = proposal.docs.filter((d) => d.person_key === personKey);
+  // Resolve people exactly as GET /api/sessions/:id does for the register, so
+  // the key the reviewer clicked always names the same documents here. The
+  // person_key saved on each document is not enough on its own: a grouping
+  // pass with nothing to merge used to skip saving, leaving it null, and the
+  // button then found "no documents" for a person the screen plainly showed.
+  const client = { name: session.client_name, dob: session.client_dob };
+  const current = clusterPeople(proposal.docs.map((d) => ({ ...d })), client);
+  const keyOf = new Map(current.docs.map((d) => [d.doc_key, d.person_key]));
+
+  const moving = proposal.docs.filter((d) => keyOf.get(d.doc_key) === personKey);
   if (!moving.length) {
     return NextResponse.json(
       { error: 'no documents are currently assigned to that person' },
@@ -74,13 +83,10 @@ export async function POST(
   }
 
   const flagged = proposal.docs.map((d) =>
-    d.person_key === personKey ? { ...d, person_client_confirmed: true } : d,
+    keyOf.get(d.doc_key) === personKey ? { ...d, person_client_confirmed: true } : d,
   );
 
-  const clustered = clusterPeople(flagged, {
-    name: session.client_name,
-    dob: session.client_dob,
-  });
+  const clustered = clusterPeople(flagged, client);
   const { docs: grouped, merged } = groupByCategory(
     clustered.docs,
     clustered.people.map((p) => p.key),
