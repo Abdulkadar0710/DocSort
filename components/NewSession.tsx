@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { browserClient } from '@/lib/supabase';
 import { buildInventory, openPdf } from '@/lib/pdf/client';
@@ -30,6 +30,24 @@ export function NewSession() {
   const [pct, setPct] = useState(0);
 
   const busy = phase !== 'idle' && phase !== 'error';
+
+  // With Cache Components, leaving this page hides it rather than unmounting
+  // it, so useState survives the trip: coming back ("Cancel and go back",
+  // "+ New session") showed the previous upload's name, progress and a
+  // disabled button. Effects still clean up when the page is hidden, so clear
+  // the card there and every return starts blank.
+  useEffect(
+    () => () => {
+      setPhase('idle');
+      setClientName('');
+      setClientDob('');
+      setClientRef('');
+      setDetail('');
+      setPct(0);
+      if (inputRef.current) inputRef.current.value = '';
+    },
+    [],
+  );
 
   // The name is the one thing the pipeline cannot work without. Every document
   // is filed under a person, and "does this belong to the client?" is answered
