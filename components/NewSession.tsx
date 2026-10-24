@@ -23,9 +23,9 @@ export function NewSession() {
   // Who the matter is about. Everything else found in the bundle is reported as
   // another person rather than quietly discarded — which is only answerable if
   // we know who the client is, so this is asked up front rather than compiled in.
-  const [clientName, setClientName] = useState('Daniel James Marsh');
-  const [clientDob, setClientDob] = useState('14/03/1984');
-  const [clientRef, setClientRef] = useState('UI-22-0815-4471');
+  const [clientName, setClientName] = useState('');
+  const [clientDob, setClientDob] = useState('');
+  const [clientRef, setClientRef] = useState('');
   const [detail, setDetail] = useState('');
   const [pct, setPct] = useState(0);
 
