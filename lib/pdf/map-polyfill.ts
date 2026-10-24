@@ -54,4 +54,21 @@ function patch(proto: Upsertable) {
 patch(Map.prototype as unknown as Upsertable);
 patch(WeakMap.prototype as unknown as Upsertable);
 
+// pdf.js also patches `Iterator.prototype` at module load. Node 20 (which runs
+// this module during server rendering) has no global `Iterator`, so expose one
+// backed by the built-in %IteratorPrototype%.
+if (typeof (globalThis as { Iterator?: unknown }).Iterator === 'undefined') {
+  const IteratorPrototype = Object.getPrototypeOf(
+    Object.getPrototypeOf([][Symbol.iterator]()),
+  );
+  function Iterator() {}
+  Iterator.prototype = IteratorPrototype;
+  Object.defineProperty(globalThis, 'Iterator', {
+    value: Iterator,
+    writable: true,
+    configurable: true,
+    enumerable: false,
+  });
+}
+
 export {};
