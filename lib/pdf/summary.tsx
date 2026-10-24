@@ -128,7 +128,7 @@ function Stat({ n, label }: { n: number | string; label: string }) {
 function Footer() {
   return (
     <View style={styles.footer} fixed>
-      <Text>Unbundle — medico-legal document preparation</Text>
+      <Text>DocSort Medical — medico-legal document preparation</Text>
       <Text render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} />
     </View>
   );
@@ -151,7 +151,7 @@ function SummaryDoc(input: SummaryInput) {
   const scannedDocs = real.filter((d) => formatOf(d.pages, input.pageText).needsOcr);
 
   return (
-    <Document title={`Unbundle summary — ${input.sessionName}`}>
+    <Document title={`DocSort Medical summary — ${input.sessionName}`}>
       {/* ------------------------------------------------ overview + register */}
       <Page size="A4" orientation="landscape" style={styles.page}>
         <Text style={styles.h1}>Document register</Text>

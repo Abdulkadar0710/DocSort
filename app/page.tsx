@@ -51,7 +51,7 @@ export default function Home() {
     <main className="mx-auto max-w-3xl px-6 py-12">
       <header className="mb-8">
         <h1 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
-          Unbundle
+          DocSort Medical
         </h1>
         <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
           Turn one medico-legal bundle into individual, identified documents —

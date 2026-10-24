@@ -1,9 +1,9 @@
-# Unbundle
+# DocSort Medical
 
 Turns one medico-legal bundle PDF into individual, identified documents — with
 every page traceable back to where it came from.
 
-Built for the Unbundle hackathon brief. The reviewer's journey is four steps:
+Built for the Unbundle hackathon brief (the project's original name). The reviewer's journey is four steps:
 **upload → preview & refine → approve → download**. Nothing is split until the
 reviewer approves, and every session is saved and can be reopened.
 

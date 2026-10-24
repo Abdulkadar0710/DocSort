@@ -165,7 +165,7 @@ export async function buildChildPdfs(
         .filter(Boolean)
         .join(' · '),
     );
-    out.setProducer('Unbundle');
+    out.setProducer('DocSort Medical');
 
     const indices = doc.pages
       .filter((p) => p >= 1 && p <= total)
